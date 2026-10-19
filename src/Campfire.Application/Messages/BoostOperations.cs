@@ -1,4 +1,5 @@
 using Campfire.Application.Data;
+using Campfire.Application.Rooms;
 
 using Dapper;
 
@@ -11,12 +12,13 @@ namespace Campfire.Application.Messages;
 public static class BoostOperations
 {
     /// <summary><c>@message.boosts.create!(content:, booster:)</c>.</summary>
-    /// <exception cref="RecordNotFoundException">The message does not exist.</exception>
+    /// <exception cref="RecordNotFoundException">The message does not exist, or its room is gone or being deleted.</exception>
     public static Boost Create( WriteScope scope, long messageId, long boosterId, string content )
     {
         ArgumentNullException.ThrowIfNull( scope );
 
         var message = MessageQueries.Find( scope.Db, messageId );
+        RoomDeletions.EnsureActive( scope.Db, message.RoomId );
         var now = scope.Now;
         var boost = new Boost { MessageId = messageId, BoosterId = boosterId, Content = content, CreatedAt = now, UpdatedAt = now };
         boost.Id = DataWrites.Save( ( ) => scope.Db.Connection.ExecuteScalar<long>(

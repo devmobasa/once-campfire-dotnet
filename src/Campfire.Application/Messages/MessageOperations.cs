@@ -35,6 +35,7 @@ public static class MessageOperations
         ArgumentNullException.ThrowIfNull( scope );
         ArgumentNullException.ThrowIfNull( attributes );
 
+        RoomDeletions.EnsureActive( scope.Db, attributes.RoomId );
         var now = scope.Now;
         var message = new Message
         {
@@ -110,6 +111,7 @@ public static class MessageOperations
         ArgumentNullException.ThrowIfNull( scope );
 
         var message = MessageQueries.Find( scope.Db, messageId );
+        RoomDeletions.EnsureActive( scope.Db, message.RoomId );
         var key = RecordKeys.Message( message.Id );
         scope.Enlist( key );
         var columns = new ChangedColumns( TableNames.Messages );

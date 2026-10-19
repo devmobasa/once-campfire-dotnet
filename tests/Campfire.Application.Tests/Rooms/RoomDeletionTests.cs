@@ -1,5 +1,6 @@
 using Campfire.Application.Data;
 using Campfire.Application.Memberships;
+using Campfire.Application.Messages;
 using Campfire.Application.Rooms;
 using Campfire.Application.Storage;
 using Campfire.Application.Tests.Storage.Support;
@@ -66,6 +67,43 @@ public sealed class RoomDeletionTests
         Assert.Equal( stale.Name, deleting.Name );
         Assert.Equal( 0, await test.CountAsync( "memberships", "room_id=@p0", roomId ) );
         Assert.Equal( 1, await test.CountAsync( "campfire_room_deletions", "room_id=@p0", roomId ) );
+        Assert.Empty( test.Hooks.Events );
+    }
+
+    [Theory]
+    [InlineData( "create" )]
+    [InlineData( "update" )]
+    [InlineData( "boost" )]
+    public async Task Stale_message_writes_are_rejected_after_logical_removal( string mutation )
+    {
+        using var test = await TestDatabase.CreateAsync( );
+        var roomId = TestDatabase.Id( "designers" );
+        var messageId = TestDatabase.Id( "first" );
+        var messages = await test.CountAsync( "messages", "room_id=@p0", roomId );
+        var boosts = await test.CountAsync( "boosts", "message_id=@p0", messageId );
+        var updatedAt = (await test.ReadAsync( db => MessageQueries.Find( db, messageId ) )).UpdatedAt;
+        await test.WriteAsync( scope => RoomOperations.Destroy( scope, roomId ) );
+        test.Hooks.Clear( );
+
+        await Assert.ThrowsAsync<RecordNotFoundException>( ( ) => test.WriteAsync( scope =>
+        {
+            switch ( mutation )
+            {
+                case "create":
+                    MessageOperations.Create( scope, new NewMessage { RoomId = roomId, CreatorId = TestDatabase.Id( "david" ) } );
+                    break;
+                case "update":
+                    MessageOperations.Update( scope, messageId, new Assigned<string?>( "edited after removal" ) );
+                    break;
+                case "boost":
+                    BoostOperations.Create( scope, messageId, TestDatabase.Id( "david" ), "👍" );
+                    break;
+            }
+        } ) );
+
+        Assert.Equal( messages, await test.CountAsync( "messages", "room_id=@p0", roomId ) );
+        Assert.Equal( boosts, await test.CountAsync( "boosts", "message_id=@p0", messageId ) );
+        Assert.Equal( updatedAt, (await test.ReadAsync( db => MessageQueries.Find( db, messageId ) )).UpdatedAt );
         Assert.Empty( test.Hooks.Events );
     }
 
