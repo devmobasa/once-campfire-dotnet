@@ -67,6 +67,50 @@ public sealed class HostingTests
         Assert.Equal( "https://a.example.com", prefixed.PublicOrigin );
     }
 
+    [Theory]
+    [InlineData( "http://Chat.Example.com:8080", "http://chat.example.com:8080", "chat.example.com" )]
+    [InlineData( "  http://Chat.Example.com:8080  ", "http://chat.example.com:8080", "chat.example.com" )]
+    [InlineData( "https://Chat.Example.com:8443/", "https://chat.example.com:8443", "chat.example.com" )]
+    [InlineData( "https://chat.example.com:443", "https://chat.example.com", "chat.example.com" )]
+    [InlineData( "http://127.0.0.1:8080", "http://127.0.0.1:8080", "127.0.0.1" )]
+    [InlineData( "http://[::1]:8080", "http://[::1]:8080", "[::1]" )]
+    public void An_explicit_public_origin_preserves_its_scheme_and_public_port( string configured, string expected, string host )
+    {
+        var options = Options( ("CAMPFIRE_PUBLIC_ORIGIN", configured), ("TLS_DOMAIN", "certificate.example.com") );
+
+        Assert.Equal( expected, options.PublicOrigin );
+        Assert.Equal( host, options.PublicHost );
+    }
+
+    [Theory]
+    [InlineData( "chat.example.com" )]
+    [InlineData( "ftp://chat.example.com" )]
+    [InlineData( "https://user:password@chat.example.com" )]
+    [InlineData( "https://chat.example.com/path" )]
+    [InlineData( "https://chat.example.com/../" )]
+    [InlineData( "https://chat.example.com?query" )]
+    [InlineData( "https://chat.example.com#fragment" )]
+    [InlineData( "https://chat.example.com:0" )]
+    [InlineData( "https://chat.example.com:65536" )]
+    [InlineData( "https://chat.example.com\\" )]
+    [InlineData( "https://chat.exam\nple.com" )]
+    [InlineData( "http://chat.example.com\r\n" )]
+    [InlineData( "\thttp://chat.example.com" )]
+    [InlineData( "\n" )]
+    public void An_invalid_public_origin_fails_at_startup( string configured ) =>
+        Assert.Throws<InvalidOperationException>( ( ) => Options( ("CAMPFIRE_PUBLIC_ORIGIN", configured) ) );
+
+    [Fact]
+    public void A_public_origin_does_not_enable_tls_or_hide_an_invalid_tls_domain( )
+    {
+        var values = new Dictionary<string, string?> { ["CAMPFIRE_PUBLIC_ORIGIN"] = "http://chat.example.com:8080" };
+        var configuration = new ConfigurationBuilder( ).AddInMemoryCollection( values ).Build( );
+
+        Assert.Equal( "http://chat.example.com:8080", CampfireOptions.FromConfiguration( configuration ).PublicOrigin );
+        Assert.False( FrontServerOptions.FromConfiguration( configuration ).HasTls );
+        Assert.Throws<InvalidOperationException>( ( ) => Options( ("CAMPFIRE_PUBLIC_ORIGIN", "http://chat.example.com:8080"), ("TLS_DOMAIN", "invalid/path") ) );
+    }
+
     /// <summary>Thruster takes <c>THRUSTER_TLS_DOMAIN</c> whenever it is set, even empty.</summary>
     [Theory]
     [InlineData( " , ", null )]

@@ -1,3 +1,5 @@
+using System.Globalization;
+using Campfire.Application.Data;
 using Campfire.Application.Messages;
 using Campfire.Application.Tests.Support;
 
@@ -6,7 +8,7 @@ using Microsoft.Data.Sqlite;
 namespace Campfire.Application.Tests.Messages;
 
 /// <summary><c>Message::Pagination</c>: pages of 40 by <c>created_at</c> alone, bounded in SQL.</summary>
-public sealed class MessagePagesTests
+public sealed class MessagePagesTests( ITestOutputHelper output )
 {
     private static readonly long Watercooler = TestDatabase.Id( "watercooler" );
 
@@ -167,6 +169,103 @@ public sealed class MessagePagesTests
     }
 
     private static List<long> Ids( IEnumerable<Message> messages ) => [.. messages.Select( message => message.Id )];
+
+    [Theory]
+    [InlineData( false )]
+    [InlineData( true )]
+    public async Task Updated_since_returns_the_newest_created_changes_after_room_time_and_id_filters( bool updatedIndex )
+    {
+        using var testDatabase = await TestDatabase.CreateAsync( );
+        var since = new DateTime( 2100, 1, 1, 0, 0, 0, DateTimeKind.Utc );
+        for ( var index = 0; index < 72; index++ )
+        {
+            var created = new DateTime( 2020, 1, 1, 0, 0, 0, DateTimeKind.Utc ).AddMinutes( index );
+            var updated = index == 70 ? since : since.AddMinutes( 100 - index );
+            await testDatabase.ExecuteAsync(
+                "INSERT INTO messages (id, client_message_id, creator_id, room_id, created_at, updated_at) VALUES (@p0, @p1, @p2, @p3, @p4, @p5)",
+                2_000_000_000L + index, $"changed-{index}", TestDatabase.Id( "david" ), index == 71 ? TestDatabase.Id( "designers" ) : Watercooler,
+                created.ToString( "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture ), updated.ToString( "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture ) );
+        }
+
+        testDatabase.Database.Dispose( );
+        using var reopened = CampfireDatabase.Open(
+            new DatabaseOptions { StorageRoot = testDatabase.Directory, Environment = "test", ReaderCount = 1, CreateUpdatedMessageIndex = updatedIndex },
+            testDatabase.Clock, testDatabase.Hooks.ToHooks( testDatabase.BodyText ) );
+        var excluded = await reopened.ReadAsync( db => MessagePages.PageUpdatedSince( db, Watercooler, since, [2_000_000_067L, 2_000_000_068L, 2_000_000_069L] ), TestDatabase.Cancellation );
+        var complete = await reopened.ReadAsync( db => MessagePages.PageUpdatedSince( db, Watercooler, since, [] ), TestDatabase.Cancellation );
+
+        Assert.Equal( Enumerable.Range( 27, 40 ).Select( index => 2_000_000_000L + index ), Ids( excluded ) );
+        Assert.Equal( Enumerable.Range( 30, 40 ).Select( index => 2_000_000_000L + index ), Ids( complete ) );
+    }
+
+    [Theory]
+    [InlineData( false, false )]
+    [InlineData( true, false )]
+    [InlineData( true, true )]
+    [InlineData( false, true )]
+    public async Task Updated_since_uses_the_available_index_without_sacrificing_ordered_early_exit( bool creationIndex, bool updateIndex )
+    {
+        using var testDatabase = await TestDatabase.CreateAsync( );
+        await testDatabase.ExecuteAsync(
+            """
+            WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 4000)
+            INSERT INTO messages (client_message_id, creator_id, room_id, created_at, updated_at)
+            SELECT 'old-' || value, @p0, @p1, '2020-01-01 00:00:00', '2020-01-01 00:00:00' FROM numbers
+            """, TestDatabase.Id( "david" ), Watercooler );
+        if ( !creationIndex )
+        {
+            await testDatabase.ExecuteAsync( "DROP INDEX index_messages_on_room_id_and_created_at" );
+        }
+
+        if ( updateIndex )
+        {
+            await testDatabase.ExecuteAsync( "CREATE INDEX index_messages_on_room_id_and_updated_at ON messages (room_id, updated_at)" );
+        }
+
+        await testDatabase.ExecuteAsync( "ANALYZE" );
+        testDatabase.Database.Dispose( );
+        using var reopened = CampfireDatabase.Open(
+            new DatabaseOptions { StorageRoot = testDatabase.Directory, Environment = "test", ReaderCount = 1, CreateMessageIndex = creationIndex, CreateUpdatedMessageIndex = false },
+            testDatabase.Clock, testDatabase.Hooks.ToHooks( testDatabase.BodyText ) );
+        using var reader = await reopened.AcquireReaderAsync( TestDatabase.Cancellation );
+        string sql;
+        using ( var log = new StatementLog( reader.Db.Connection ) )
+        {
+            MessagePages.PageUpdatedSince( reader.Db, Watercooler, new DateTime( 2026, 9, 26, 12, 0, 0, DateTimeKind.Utc ), [] );
+            sql = Assert.Single( log.Statements );
+        }
+
+        using var command = reader.Db.Connection.CreateCommand( );
+        command.CommandText = $"EXPLAIN QUERY PLAN {sql}";
+        using var plan = command.ExecuteReader( );
+        var steps = new List<string>( );
+        while ( plan.Read( ) )
+        {
+            steps.Add( plan.GetString( 3 ) );
+        }
+
+        output.WriteLine( $"creationIndex={creationIndex}, updateIndex={updateIndex}\n{sql}\n{string.Join( '\n', steps )}" );
+        if ( updateIndex )
+        {
+            Assert.True( steps.Any( step => step.Contains( "index_messages_on_room_id_and_updated_at (room_id=? AND updated_at>?)", StringComparison.Ordinal ) ), string.Join( '\n', steps ) );
+        }
+        else
+        {
+            Assert.Contains( steps, step => step.StartsWith( "SEARCH messages ", StringComparison.Ordinal )
+                && step.Contains( "(room_id=?)", StringComparison.Ordinal ) );
+        }
+
+        Assert.DoesNotContain( steps, step => step.StartsWith( "SCAN messages", StringComparison.Ordinal ) );
+        if ( creationIndex && !updateIndex )
+        {
+            Assert.DoesNotContain( steps, step => step.Contains( "USE TEMP B-TREE FOR ORDER BY", StringComparison.Ordinal ) );
+            Assert.Contains( steps, step => step.Contains( "index_messages_on_room_id_and_created_at", StringComparison.Ordinal ) );
+        }
+        else
+        {
+            Assert.Contains( steps, step => step.Contains( "USE TEMP B-TREE FOR ORDER BY", StringComparison.Ordinal ) );
+        }
+    }
 
     private static List<long> RoomIds( SqliteConnection connection, string sql )
     {

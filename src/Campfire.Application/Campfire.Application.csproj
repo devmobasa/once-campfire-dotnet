@@ -19,6 +19,7 @@
     <PackageReference Include="Dapper.AOT" />
     <PackageReference Include="AngleSharp" />
     <PackageReference Include="Microsoft.Extensions.Identity.Core" />
+    <PackageReference Include="BCrypt.Net-Next" />
     <PackageReference Include="NetVips" />
   </ItemGroup>
 

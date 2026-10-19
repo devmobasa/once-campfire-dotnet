@@ -6,7 +6,7 @@ namespace Campfire.Web.Views;
 /// <summary>
 /// <c>ERB::Util.html_escape</c>: only <c>&amp; &lt; &gt; &quot; '</c> are escaped, as <c>&amp;amp; &amp;lt; &amp;gt;
 /// &amp;quot; &amp;#39;</c>. The one entity table here serves the helpers that assemble markup outside a slice and
-/// <see cref="Rendering.RailsHtmlEncoder"/>, which every slice renders with.
+/// the safe write members used by every slice.
 /// </summary>
 public static class Escaping
 {

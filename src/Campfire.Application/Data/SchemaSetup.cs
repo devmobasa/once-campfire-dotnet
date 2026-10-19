@@ -10,8 +10,8 @@ namespace Campfire.Application.Data;
 /// <summary>
 /// Boot-time schema handling. An empty database gets <c>schema.sql</c>. An existing one is
 /// accepted only when it is at the pinned migration with nothing later, and its tables and indexes match
-/// <c>schema.sql</c>, allowing only the approved optional <see cref="MessagesIndex"/>. There are no migrations and no
-/// <c>EnsureCreated</c>.
+/// <c>schema.sql</c>, allowing optional message indexes and exactly validated cleanup tables and indexes.
+/// Boot adds missing cleanup objects without changing the Rails migration version. It does not use <c>EnsureCreated</c>.
 /// </summary>
 public static partial class SchemaSetup
 {
@@ -24,9 +24,15 @@ public static partial class SchemaSetup
     /// <summary>The approved optional message-page index, using Rails' conventional name.</summary>
     public const string MessagesIndex = "index_messages_on_room_id_and_created_at";
 
+    /// <summary>The optional reconnect index. Creation is disabled by default.</summary>
+    public const string UpdatedMessagesIndex = "index_messages_on_room_id_and_updated_at";
+
     /// <summary>The optional index's statement, exactly as <c>schema.sql</c> spells it.</summary>
     private const string MessagesIndexSql =
         $"CREATE INDEX IF NOT EXISTS \"{MessagesIndex}\" ON \"{TableNames.Messages}\" (\"room_id\", \"created_at\");";
+
+    private const string UpdatedMessagesIndexSql =
+        $"CREATE INDEX IF NOT EXISTS \"{UpdatedMessagesIndex}\" ON \"{TableNames.Messages}\" (\"room_id\", \"updated_at\");";
 
     private const string ResourceName = "Campfire.Application.Data.schema.sql";
 
@@ -53,12 +59,14 @@ public static partial class SchemaSetup
     /// <param name="clock">The clock for the metadata rows' timestamps.</param>
     /// <param name="createMessageIndex">Whether to create the optional <see cref="MessagesIndex"/>.</param>
     /// <param name="logger">The index creation's progress; nowhere when omitted.</param>
+    /// <param name="createUpdatedMessageIndex">Whether to create the optional reconnect index.</param>
     /// <exception cref="SchemaMismatchException">The database is not one this build can run on.</exception>
     public static SchemaPreparation Prepare(
-        SqliteConnection connection, string environment, TimeProvider clock, bool createMessageIndex = true, ILogger? logger = null )
+        SqliteConnection connection, string environment, TimeProvider clock, bool createMessageIndex = true, ILogger? logger = null, bool createUpdatedMessageIndex = false )
     {
         logger ??= NullLogger.Instance;
-        if ( IsEmpty( connection ) )
+        var empty = IsEmpty( connection );
+        if ( empty )
         {
             if ( createMessageIndex )
             {
@@ -70,12 +78,13 @@ public static partial class SchemaSetup
             {
                 CreatedMessageIndex( logger, MessagesIndex );
             }
-
-            return SchemaPreparation.Loaded;
+        }
+        else
+        {
+            Check( connection );
         }
 
-        Check( connection );
-        if ( createMessageIndex && !HasMessageIndex( connection ) )
+        if ( createMessageIndex && !HasMessageIndex( connection, MessagesIndex ) )
         {
             // Validate before writing: IF NOT EXISTS must not conceal a clashing definition.
             CreatingMessageIndex( logger, MessagesIndex );
@@ -83,13 +92,21 @@ public static partial class SchemaSetup
             CreatedMessageIndex( logger, MessagesIndex );
         }
 
-        return SchemaPreparation.Accepted;
+        if ( createUpdatedMessageIndex && !HasMessageIndex( connection, UpdatedMessagesIndex ) )
+        {
+            CreatingMessageIndex( logger, UpdatedMessagesIndex );
+            connection.ExecuteNonQuery( UpdatedMessagesIndexSql );
+            CreatedMessageIndex( logger, UpdatedMessagesIndex );
+        }
+
+        CleanupSchema.Prepare( connection );
+        return empty ? SchemaPreparation.Loaded : SchemaPreparation.Accepted;
     }
 
-    private static bool HasMessageIndex( SqliteConnection connection )
+    private static bool HasMessageIndex( SqliteConnection connection, string name )
     {
         using var command = connection.CreateCommand( "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=@name" );
-        command.Parameters.AddWithValue( "@name", MessagesIndex );
+        command.Parameters.AddWithValue( "@name", name );
         return ( long ) command.ExecuteScalar( )! != 0;
     }
 
@@ -119,6 +136,7 @@ public static partial class SchemaSetup
         problems.AddRange( MigrationProblems( connection ) );
         if ( problems.Count == 0 )
         {
+            problems.AddRange( CleanupSchema.Problems( connection ) );
             problems.AddRange( ShapeProblems( SchemaShape.Read( connection ) ) );
         }
 
@@ -173,10 +191,15 @@ public static partial class SchemaSetup
 
     private static List<string> ShapeProblems( SchemaShape actual )
     {
+        CleanupSchema.RemoveOwned( actual );
         var expected = Expected.Value;
         var problems = new List<string>( );
         Compare( "table", expected.Tables, actual.Tables, problems, allowedExtra: null );
-        Compare( "index", expected.Indexes, actual.Indexes, problems, allowedExtra: (MessagesIndex, MessagesIndexShape) );
+        Compare( "index", expected.Indexes, actual.Indexes, problems, allowedExtra:
+        [
+            (MessagesIndex, MessagesIndexShape),
+            (UpdatedMessagesIndex, SchemaShape.DescribeIndex( TableNames.Messages, unique: false, partial: false, ["room_id", "updated_at"] )),
+        ] );
         return problems;
     }
 
@@ -188,7 +211,7 @@ public static partial class SchemaSetup
         SortedDictionary<string, string> expected,
         SortedDictionary<string, string> actual,
         List<string> problems,
-        (string Name, string Shape)? allowedExtra )
+        (string Name, string Shape)[]? allowedExtra )
     {
         foreach ( var (name, shape) in expected )
         {
@@ -204,7 +227,7 @@ public static partial class SchemaSetup
 
         foreach ( var (name, shape) in actual )
         {
-            var allowed = allowedExtra is { } extra && extra.Name == name && extra.Shape == shape;
+            var allowed = allowedExtra?.Any( extra => extra.Name == name && extra.Shape == shape ) == true;
             if ( !expected.ContainsKey( name ) && !allowed )
             {
                 problems.Add( $"unexpected {kind} {name} [{shape}]" );

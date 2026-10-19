@@ -16,43 +16,7 @@ public sealed class MembershipTests
     private static Task<Membership> DisconnectedAsync( TestDatabase testDatabase ) =>
         testDatabase.WriteAsync( scope => MembershipPresence.Disconnected( scope, DavidWatercooler ) );
 
-    private static Task<bool> ConnectedExistsAsync( TestDatabase testDatabase ) =>
-        testDatabase.ReadAsync( db => MembershipQueries.IsConnected( db, DavidWatercooler, testDatabase.Clock.Now ) );
-
-    private static Task<bool> DisconnectedExistsAsync( TestDatabase testDatabase ) =>
-        testDatabase.ReadAsync( db => MembershipQueries.IsDisconnected( db, DavidWatercooler, testDatabase.Clock.Now ) );
-
     private static Task<Membership> StoredAsync( TestDatabase testDatabase ) => testDatabase.ReadAsync( db => MembershipQueries.Find( db, DavidWatercooler ) );
-
-    [Fact]
-    public async Task Connected_scope_holds_a_membership_only_while_its_connection_is_fresh( )
-    {
-        using var testDatabase = await TestDatabase.CreateAsync( );
-
-        await ConnectedAsync( testDatabase );
-        Assert.True( await ConnectedExistsAsync( testDatabase ) );
-
-        await DisconnectedAsync( testDatabase );
-        Assert.False( await ConnectedExistsAsync( testDatabase ) );
-
-        testDatabase.Clock.Travel( TtlPlusOne );
-        Assert.False( await ConnectedExistsAsync( testDatabase ) );
-    }
-
-    [Fact]
-    public async Task Disconnected_scope_holds_a_membership_once_it_disconnects_or_its_connection_goes_stale( )
-    {
-        using var testDatabase = await TestDatabase.CreateAsync( );
-
-        await DisconnectedAsync( testDatabase );
-        Assert.True( await DisconnectedExistsAsync( testDatabase ) );
-
-        await ConnectedAsync( testDatabase );
-        Assert.False( await DisconnectedExistsAsync( testDatabase ) );
-
-        testDatabase.Clock.Travel( TtlPlusOne );
-        Assert.True( await DisconnectedExistsAsync( testDatabase ) );
-    }
 
     [Fact]
     public async Task Connected_is_false_when_the_connection_is_stale( )

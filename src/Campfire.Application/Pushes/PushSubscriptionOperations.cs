@@ -14,13 +14,13 @@ public static class PushSubscriptionOperations
 {
     /// <summary>
     /// <c>relevant_subscriptions.merge(Membership.involved_in_*)</c>: subscriptions joined to their user's memberships
-    /// in the room, visible, disconnected, and not the creator's, in id order.
+    /// in the room, active, visible, disconnected, and not the creator's, in id order.
     /// </summary>
     private const string RelevantSql =
         $"SELECT {Columns.PushSubscriptions} FROM push_subscriptions " +
         "INNER JOIN users ON push_subscriptions.user_id = users.id INNER JOIN memberships ON users.id = memberships.user_id " +
         "WHERE (memberships.connected_at IS NULL OR memberships.connected_at < @cutoff) AND memberships.room_id = @roomId " +
-        "AND memberships.user_id <> @creatorId AND memberships.involvement = @involvement";
+        "AND memberships.user_id <> @creatorId AND memberships.involvement = @involvement AND users.status = @active";
 
     /// <summary><c>Current.user.push_subscriptions.destroy_by(id:)</c>.</summary>
     public static void Destroy( WriteScope scope, long userId, long subscriptionId )
@@ -84,13 +84,6 @@ public static class PushSubscriptionOperations
         ArgumentNullException.ThrowIfNull( db );
 
         var message = MessageQueries.Find( db, messageId );
-        var room = RoomQueries.Find( db, message.RoomId );
-        var creator = UserQueries.Find( db, message.CreatorId );
-        var body = MessageBodies.PlainText( db, bodyText, message.Id );
-        var payload = room.IsDirect
-            ? new PushPayload( creator.Name, body, $"/rooms/{room.Id}" )
-            : new PushPayload( room.Name ?? "", $"{creator.Name}: {body}", $"/rooms/{room.Id}" );
-
         var cutoff = Membership.ConnectionCutoff( now );
         var everything = db.Connection.Query<PushSubscription>(
                 $"{RelevantSql} ORDER BY push_subscriptions.id",
@@ -99,6 +92,7 @@ public static class PushSubscriptionOperations
                     cutoff,
                     roomId = message.RoomId,
                     creatorId = message.CreatorId,
+                    active = UserStatus.Active,
                     involvement = Involvement.Everything
                 },
                 db.Transaction )
@@ -113,11 +107,23 @@ public static class PushSubscriptionOperations
                         cutoff,
                         roomId = message.RoomId,
                         creatorId = message.CreatorId,
+                        active = UserStatus.Active,
                         involvement = Involvement.Mentions,
                         mentioneeIds = IdLists.Json( mentioneeIds ),
                     },
                     db.Transaction )
                 .AsList( );
+        if ( everything.Count == 0 && mentions.Count == 0 )
+        {
+            return new MessagePush( null, everything, mentions );
+        }
+
+        var room = RoomQueries.Find( db, message.RoomId );
+        var creator = UserQueries.Find( db, message.CreatorId );
+        var body = MessageBodies.PlainText( db, bodyText, message.Id );
+        var payload = room.IsDirect
+            ? new PushPayload( creator.Name, body, $"/rooms/{room.Id}" )
+            : new PushPayload( room.Name ?? "", $"{creator.Name}: {body}", $"/rooms/{room.Id}" );
         return new MessagePush( payload, everything, mentions );
     }
 }

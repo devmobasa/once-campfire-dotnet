@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 
 namespace Campfire.Web.Assets;
 
@@ -78,7 +79,8 @@ public static class AssetsServiceCollectionExtensions
             rawPath,
             request.Headers.AcceptEncoding.Count > 0 ? request.Headers.AcceptEncoding.ToString( ) : null,
             request.Headers.Range.Count > 0 ? request.Headers.Range.ToString( ) : null,
-            request.Headers.IfModifiedSince.Count > 0 ? request.Headers.IfModifiedSince.ToString( ) : null );
+            request.Headers.IfModifiedSince.Count > 0 ? request.Headers.IfModifiedSince.ToString( ) : null,
+            request.Headers.TryGetValue( HeaderNames.IfNoneMatch, out var noneMatch ) ? noneMatch.ToString( ) : null );
     }
 
     private static async Task WriteAsync( HttpContext httpContext, StaticResponse response )

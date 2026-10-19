@@ -13,8 +13,8 @@ namespace Campfire.Web.App;
 /// lookups go through the lookup the caller passes and nothing else touches the database.
 /// </summary>
 /// <remarks>
-/// Where Rails raises (<see cref="RichTextException"/>), this raises too, so the after-commit step fails as Rails'
-/// callback would.
+/// <see cref="RichTextException"/> fails the calling operation.
+/// During message creation, that failure rolls back the transaction before external effects run.
 /// </remarks>
 public sealed class RichTextBodyText( SignedGlobalIds signedGlobalIds, TimeProvider clock ) : IMessageBodyText
 {

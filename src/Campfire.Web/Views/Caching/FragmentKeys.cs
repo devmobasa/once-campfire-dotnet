@@ -16,7 +16,7 @@ public readonly record struct RecordVersion( long Id, DateTimeOffset UpdatedAt )
 }
 
 /// <summary>
-/// What a <c>messages/_message</c> fragment depends on, all known before its view model is built (plan lesson 3).
+/// Inputs for a <c>messages/_message</c> fragment, all known before its view model is built.
 /// Rails keys the fragment on the message alone (<c>cache [ message, "presentation-v3" ]</c>; boosts touch the
 /// message); this key also covers what Rails lets go stale: the author's and boosters' names and avatars, the
 /// room's display name, and the origin in the copy-link URL.

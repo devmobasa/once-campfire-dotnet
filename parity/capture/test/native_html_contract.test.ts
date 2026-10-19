@@ -225,7 +225,7 @@ test("retired-browser contract retains changed status, security, body, DOM, ARIA
     ["missing native raw receipt", (f) => fs.rmSync(f.actual + ".network.contracts.json")],
     ["missing control raw receipt", (f) => fs.rmSync(f.control + ".network.contracts.json")],
     ["identically invalid native/control cookies", (f) => {
-      const bad = { ...receipt, cookies: [{ name: ".Campfire.Auth", cleared: false, malformed: false, attributes: { path: "/", httponly: "", samesite: "none" } }] }
+      const bad = { ...receipt, cookies: [{ name: "session_token", cleared: false, malformed: false, attributes: { path: "/", httponly: "", samesite: "none" } }] }
       for (const base of [f.actual, f.control]) {
         fs.writeFileSync(base + ".network.contracts.json", JSON.stringify([bad]))
         fs.writeFileSync(base + ".network.txt", network.replace("  body:", "  set-cookie: session_token; path=/; httponly; samesite=none\n  body:"))

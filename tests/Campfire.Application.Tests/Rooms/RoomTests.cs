@@ -113,17 +113,16 @@ public sealed class RoomTests
     }
 
     [Fact]
-    public async Task Destroying_a_room_destroys_its_messages_and_memberships( )
+    public async Task Destroying_a_room_removes_access_and_leaves_messages_for_recovery( )
     {
         using var testDatabase = await TestDatabase.CreateAsync( );
         var watercooler = TestDatabase.Id( "watercooler" );
 
         await testDatabase.WriteAsync( scope => RoomOperations.Destroy( scope, watercooler ) );
 
-        Assert.Equal( 0, await testDatabase.CountAsync( "messages", "room_id = @p0", watercooler ) );
+        Assert.True( await testDatabase.CountAsync( "messages", "room_id = @p0", watercooler ) > 0 );
         Assert.Equal( 0, await testDatabase.CountAsync( "memberships", "room_id = @p0", watercooler ) );
-        Assert.Null( await testDatabase.ReadAsync( db => RoomQueries.FindById( db, watercooler ) ) );
-        Assert.Equal( 0, await testDatabase.CountAsync( "boosts", "message_id IN (@p0, @p1)", TestDatabase.Id( "thirteenth" ), TestDatabase.Id( "fourth" ) ) );
+        Assert.True( (await testDatabase.ReadAsync( db => RoomQueries.FindById( db, watercooler ) ))!.IsClosed );
     }
 
     [Fact]

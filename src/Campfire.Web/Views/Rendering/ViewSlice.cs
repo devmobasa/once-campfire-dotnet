@@ -7,7 +7,7 @@ namespace Campfire.Web.Views.Rendering;
 
 /// <summary>The base of every slice with a <see cref="ViewContext"/>: partial and fragment rendering.</summary>
 /// <typeparam name="TModel">The slice's model.</typeparam>
-public abstract class ViewSlice<TModel> : RazorSlice<TModel>, IRecordedSlice
+public abstract class ViewSlice<TModel> : RailsSlice<TModel>, IRecordedSlice
     where TModel : IViewModel
 {
     protected ViewContext ViewContext => Model.ViewContext;

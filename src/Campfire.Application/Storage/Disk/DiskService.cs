@@ -153,7 +153,17 @@ public sealed partial class DiskService
     }
 
     /// <summary><c>delete(key)</c>: a missing file is fine.</summary>
-    public void Delete( string key ) => File.Delete( PathFor( key ) );
+    public void Delete( string key )
+    {
+        try
+        {
+            File.Delete( PathFor( key ) );
+        }
+        catch ( DirectoryNotFoundException )
+        {
+            // A missing key directory also means the file is absent.
+        }
+    }
 
     /// <summary>
     /// <c>delete_prefixed("variants/#{key}/")</c> from <c>Blob#delete</c>: removes every entry of the
@@ -180,13 +190,24 @@ public sealed partial class DiskService
                 continue;
             }
 
-            if ( entry is DirectoryInfo subdirectory && !entry.Attributes.HasFlag( FileAttributes.ReparsePoint ) )
+            try
             {
-                subdirectory.Delete( recursive: true );
+                if ( entry is DirectoryInfo subdirectory && !entry.Attributes.HasFlag( FileAttributes.ReparsePoint ) )
+                {
+                    subdirectory.Delete( recursive: true );
+                }
+                else
+                {
+                    entry.Delete( );
+                }
             }
-            else
+            catch ( FileNotFoundException )
             {
-                entry.Delete( );
+                // Another cleanup already removed this entry.
+            }
+            catch ( DirectoryNotFoundException )
+            {
+                // Another cleanup already removed this directory.
             }
         }
     }

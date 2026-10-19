@@ -20,6 +20,7 @@ public sealed class NativeRepairRegressionTests
         var room = SliceAppFactory.Id( "designers" );
         var csrf = await client.CsrfTokenAsync( Routes.Room( room ) );
         await factory.App.Database.WriteAsync( scope => RoomOperations.Destroy( scope, room ), TestContext.Current.CancellationToken );
+        await SliceWait.UntilAsync( ( ) => factory.Scalar<long>( $"SELECT COUNT(*) FROM rooms WHERE id={room}" ) == 0 );
         StaleSessions.MarkAll( factory );
         var before = DatabaseSnapshot.Of( factory );
 

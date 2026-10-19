@@ -39,6 +39,7 @@ public static class StorageRecords
     {
         var key = RecordKeys.Attachment( attachment.Id );
         var blobId = attachment.BlobId;
+        CleanupOutbox.QueueBlob( scope, blobId, attachment.RecordType == "Message" ? attachment.RecordId : null );
         scope.Enlist( key );
         scope.AfterCommit( key, PurgeBlobOrder, "purge_dependent_blob_later", context => context.Hooks.StorageJobs.PurgeLater( blobId ) );
     }

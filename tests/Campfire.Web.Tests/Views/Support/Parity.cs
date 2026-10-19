@@ -21,6 +21,20 @@ internal static partial class Parity
         AssertDomAgainst( name, extension, golden, rendered );
     }
 
+    /// <summary>Rails 27f5461 closes the transfer form. Preserve the older fixture and adapt only its missing closing tag.</summary>
+    public static void AssertSessionTransferDom( string rendered )
+    {
+        const string name = "sessions_transfer";
+        const string opening = "<form data-controller=\"auto-submit\"";
+        var golden = PageGoldenFacts.Golden( name, "html" );
+        Assert.Equal( 2, golden.Split( opening, StringSplitOptions.None ).Length );
+        var start = golden.IndexOf( opening, StringComparison.Ordinal );
+        var end = golden.IndexOf( '\n', start );
+        Assert.EndsWith( " />", golden[start..end], StringComparison.Ordinal );
+        Assert.DoesNotContain( "</form>", golden[start..end], StringComparison.Ordinal );
+        AssertDomAgainst( name, "html", golden.Insert( end, "</form>" ), rendered );
+    }
+
     /// <summary>
     /// Recorded native difference for admin account edit forms: Rails' singular-resource helper
     /// treats the account id as the <c>.873240054</c> suffix; native forms post to <c>/account</c>.

@@ -32,6 +32,8 @@ public sealed class StoredBlobAttachmentTests
         Assert.Equal( HttpStatusCode.OK, reply.Status );
         Assert.Contains( "class=\"message__attachment\"", reply.Body, StringComparison.Ordinal );
         Assert.Equal( blobId, attached.Id );
+        Assert.Equal( "photo.bin", factory.Scalar<string>( $"SELECT body FROM message_search_index WHERE rowid={message.Id}" ) );
+        Assert.Equal( message.CreatedAt, SliceRows.UnreadAt( factory, "jason_designers" ) );
         Assert.Equal( "image/jpeg", factory.Scalar<string>( $"SELECT content_type FROM active_storage_blobs WHERE id = {blobId}" ) );
         Assert.Contains( "\"identified\":true", attached.Metadata, StringComparison.Ordinal );
         Assert.Contains( "\"analyzed\":true", attached.Metadata, StringComparison.Ordinal );

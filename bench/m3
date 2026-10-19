@@ -1,5 +1,5 @@
 #!/usr/bin/env dotnet
-// Runs plan v3 section 10's benchmark matrix in one command (docs/benchmarks.md): checks or builds the five target
+// Runs the benchmark matrix in one command (docs/benchmarks.md). It checks or builds the five target
 // images (bench/images) and the long-room seed (bench/long-room-seed), runs each suite with bench/run (at least 3
 // interleaved repetitions, apps never concurrent, order alternating, SERVER_CPUS/LOADGEN_CPUS pinned, host networking,
 // a wait for the load average before each run), and writes one report with every target's identity.
@@ -440,7 +440,7 @@ internal static class M3
         TimeSpan took )
     {
         var report = new StringBuilder( );
-        report.AppendLine( "# Benchmarks: plan v3 section 10" ).AppendLine( );
+        report.AppendLine( "# Benchmark results" ).AppendLine( );
         if ( options.Smoke )
         {
             report.AppendLine( "> **INVALID: a smoke run.** Tiny durations and client counts, one repetition, on whatever CPUs and load the machine had. "

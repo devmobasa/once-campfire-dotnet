@@ -1,6 +1,6 @@
 # Policy-chain vector
 
-`action_chains.json` records, for every routed `controller#action` of the reference, the callbacks Rails runs around the action, in chain order. The .NET policy filter (plan section 5.3) is tested against it. Generated in the reference image in production mode with `parity/.env.reference`, on a copy of the default seed:
+`action_chains.json` records, for every routed `controller#action` of the reference, the callbacks Rails runs around the action, in chain order. The .NET policy filter is tested against it. Generated in the reference image in production mode with `parity/.env.reference`, on a copy of the default seed:
 
 ```sh
 PATH="$PWD/eng/docker-shim:$PATH" PARITY_SEED_DIR=... \

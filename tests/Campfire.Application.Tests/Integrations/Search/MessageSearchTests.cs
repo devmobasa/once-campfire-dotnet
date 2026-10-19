@@ -101,19 +101,36 @@ public sealed class MessageSearchTests
         }
     }
 
-    /// <summary>Rails passes the sanitized words straight to MATCH, so a misplaced operator raises (a 500); the fix is only retained Rails behavior.</summary>
     [Theory]
     [InlineData( "NOT" )]
     [InlineData( "OR" )]
     [InlineData( "AND" )]
     [InlineData( "eel NOT" )]
     [InlineData( "NOT eel" )]
-    public async Task A_misplaced_fts5_operator_raises_as_in_rails( string query )
+    [InlineData( "salt AND" )]
+    public async Task Operator_words_are_matched_as_literal_terms( string query )
     {
         using var testDatabase = await TestDatabase.CreateAsync( );
-        await PostAsync( testDatabase, "designers", "Do NOT feed the eel OR the shark" );
+        var message = await PostAsync( testDatabase, "designers", "Do NOT feed the eel OR the shark salt AND pepper" );
 
-        await Assert.ThrowsAsync<SqliteException>( ( ) => FindAsync( testDatabase, query ) );
+        Assert.Equal( [message.Id], (await FindAsync( testDatabase, query )).Messages.Select( match => match.Id ) );
+    }
+
+    [Fact]
+    public async Task Keeps_the_newest_hundred_ids_in_id_order_when_timestamps_disagree( )
+    {
+        using var testDatabase = await TestDatabase.CreateAsync( );
+        testDatabase.Clock.TravelTo( new DateTime( 2024, 1, 1, 0, 0, 0, DateTimeKind.Utc ) );
+        var ids = new List<long>( );
+        for ( var index = 0; index < 102; index++ )
+        {
+            testDatabase.Clock.Travel( TimeSpan.FromSeconds( -1 ) );
+            ids.Add( (await PostAsync( testDatabase, "designers", "divergentchronology" )).Id );
+        }
+
+        var found = await FindAsync( testDatabase, "divergentchronology" );
+
+        Assert.Equal( ids.Skip( 2 ), found.Messages.Select( match => match.Id ) );
     }
 
     [Fact]

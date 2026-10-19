@@ -1,5 +1,5 @@
 #!/usr/bin/env dotnet
-// Builds the benchmark targets of plan v3 section 10 as tagged, labeled images, each from a clean `git archive` of
+// Builds tagged benchmark images from a clean `git archive` of
 // the exact commit it claims, so bench/run can record every target's identity (image ID and commit) in its reports.
 //
 //   bench/images                           build whichever targets are missing (or carry another revision)

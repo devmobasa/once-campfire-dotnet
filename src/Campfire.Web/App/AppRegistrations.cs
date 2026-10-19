@@ -39,6 +39,7 @@ public static class AppRegistrations
         var minute = TimeSpan.FromMinutes( 1 );
         var minutes = TimeSpan.FromMinutes( 5 );
         services.AddJobKind<AnalyzeBlobJob, AnalyzeBlobHandler>( new( "ActiveStorage::AnalyzeJob", capacity, jobConcurrency, FullQueuePolicy.Wait, minutes ) );
+        services.AddJobKind<BroadcastUnreadRoomJob, BroadcastUnreadRoomHandler>( new( "Message::BroadcastUnreadRoomJob", capacity, 1, FullQueuePolicy.Drop, minute ) );
         services.AddJobKind<PurgeBlobJob, PurgeBlobHandler>( new( "ActiveStorage::PurgeJob", capacity, 1, FullQueuePolicy.Wait, minutes ) );
         services.AddJobKind<PushMessageJob, PushMessageHandler>( new( "Room::PushMessageJob", capacity, jobConcurrency, FullQueuePolicy.Drop, minute ) );
         services.AddJobKind<RemoveBannedContentJob, RemoveBannedContentHandler>( new( "RemoveBannedContentJob", capacity, 1, FullQueuePolicy.Wait, minutes ) );

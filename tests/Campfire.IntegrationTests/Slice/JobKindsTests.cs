@@ -21,18 +21,19 @@ public sealed class JobKindsTests
     private static readonly long Fourth = SliceAppFactory.Id( "fourth" );
 
     [Fact]
-    public void Each_kind_has_the_plans_full_queue_policy_and_consumers( )
+    public void Each_registered_kind_has_its_declared_queue_policy_and_consumer_count( )
     {
         using var factory = new SliceAppFactory( );
         var jobs = factory.App.Jobs;
 
         // JOB_CONCURRENCY is 1 in the slice; production defaults it like Rails' Resque pool.
         Assert.Equal( ("ActiveStorage::AnalyzeJob", FullQueuePolicy.Wait, 1), Describe( jobs.Analyze.Kind ) );
+        Assert.Equal( ("Message::BroadcastUnreadRoomJob", FullQueuePolicy.Drop, 1), Describe( jobs.BroadcastUnreadRoom.Kind ) );
         Assert.Equal( ("ActiveStorage::PurgeJob", FullQueuePolicy.Wait, 1), Describe( jobs.Purge.Kind ) );
         Assert.Equal( ("Room::PushMessageJob", FullQueuePolicy.Drop, 1), Describe( jobs.PushMessage.Kind ) );
         Assert.Equal( ("RemoveBannedContentJob", FullQueuePolicy.Wait, 1), Describe( jobs.RemoveBannedContent.Kind ) );
         Assert.Equal( ("Bot::WebhookJob", FullQueuePolicy.Drop, 1), Describe( jobs.Webhook.Kind ) );
-        JobKind[] kinds = [jobs.Analyze.Kind, jobs.Purge.Kind, jobs.PushMessage.Kind, jobs.RemoveBannedContent.Kind, jobs.Webhook.Kind];
+        JobKind[] kinds = [jobs.Analyze.Kind, jobs.BroadcastUnreadRoom.Kind, jobs.Purge.Kind, jobs.PushMessage.Kind, jobs.RemoveBannedContent.Kind, jobs.Webhook.Kind];
         Assert.All( kinds, kind => Assert.Equal( WorkerServiceCollectionExtensions.JobCapacity, kind.Capacity ) );
         Assert.Equal( (50, 10_000), (WebPushPool.MaxConcurrency, WebPushPool.MaxQueue) );
     }
@@ -170,11 +171,12 @@ public sealed class JobKindsTests
         var purge = factory.App.Jobs.Purge;
 
         var destroyed = await bot.SendRawAsync( HttpMethod.Delete, Routes.RoomBotMessage( watercooler, botKey, message ), "" );
-        await SliceWait.UntilAsync( ( ) => purge.Counters.Performed + purge.Counters.Failed == 2 );
+        await SliceWait.UntilAsync( ( ) => factory.Scalar<long>( $"SELECT count(*) FROM active_storage_blobs WHERE id IN ({blob.Id}, {thumbnailBlob})" ) == 0
+            && factory.Scalar<long>( "SELECT count(*) FROM campfire_cleanup" ) == 0 );
 
         Assert.Equal( HttpStatusCode.NoContent, destroyed.Status );
         Assert.Equal( 0, purge.Counters.Failed );
-        Assert.Equal( [$"purge_job blob {blob.Id}", $"purge_job blob {thumbnailBlob}"], factory.Events.Only( "purge_job" ) );
+        Assert.Contains( $"purge_job blob {blob.Id}", factory.Events.Only( "purge_job" ) );
         Assert.Equal( 0, factory.Scalar<long>( $"SELECT count(*) FROM active_storage_blobs WHERE id IN ({blob.Id}, {thumbnailBlob})" ) );
         Assert.False( File.Exists( SliceRows.BlobPath( factory, blob.Key ) ) );
         Assert.False( File.Exists( SliceRows.BlobPath( factory, thumbnail ) ) );

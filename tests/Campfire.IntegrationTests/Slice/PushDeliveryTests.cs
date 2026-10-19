@@ -97,10 +97,10 @@ public sealed class PushDeliveryTests
 
     /// <summary>
     /// <c>Room::PushMessageJob</c> end to end: the members who follow everything get the message, decryptable with their
-    /// keys; a subscription whose keys aren't a P-256 point fails with an OpenSSL error and the pool destroys it.
+    /// keys. Local encryption errors keep the affected subscriptions.
     /// </summary>
     [Fact]
-    public async Task A_new_message_is_delivered_to_subscribers_and_broken_subscriptions_are_destroyed( )
+    public async Task A_new_message_is_delivered_and_local_key_errors_keep_subscriptions( )
     {
         await using var factory = new VapidSliceAppFactory( );
         using var jason = new PushSubscriber( );
@@ -117,9 +117,9 @@ public sealed class PushDeliveryTests
         using var david = await factory.SignedInClientAsync( "david@37signals.com" );
 
         await david.PostMessageFromRoomPageAsync( designers, "<p>Push me</p>", "push-me" );
-        await SliceWait.UntilAsync( ( ) =>
-            !service.Requests.IsEmpty
-            && factory.Scalar<long>( $"SELECT count(*) FROM push_subscriptions WHERE id = {jzChrome}" ) == 0 );
+        await SliceWait.UntilAsync( ( ) => factory.App.Jobs.PushMessage.Counters.Performed == 1 );
+        var pool = factory.Services.GetRequiredService<Campfire.Application.Integrations.WebPush.WebPushPool>( );
+        await SliceWait.UntilAsync( ( ) => pool.Pending == 0 );
 
         var request = Assert.Single( service.Requests );
         var payload = JsonNode.Parse( jason.Open( request.Body ) )!;
@@ -128,5 +128,6 @@ public sealed class PushDeliveryTests
         Assert.Equal( "David: Push me", payload["options"]!["body"]!.GetValue<string>( ) );
         Assert.Equal( $"/rooms/{designers}", payload["options"]!["data"]!["path"]!.GetValue<string>( ) );
         Assert.Equal( 1, factory.Scalar<long>( $"SELECT count(*) FROM push_subscriptions WHERE id = {jasonChrome}" ) );
+        Assert.Equal( 1, factory.Scalar<long>( $"SELECT count(*) FROM push_subscriptions WHERE id = {jzChrome}" ) );
     }
 }

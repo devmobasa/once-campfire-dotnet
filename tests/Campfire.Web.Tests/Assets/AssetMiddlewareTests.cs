@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Campfire.Web.Assets;
 using Campfire.Web.Tests.Cable.Support;
 using Microsoft.AspNetCore.Builder;
@@ -55,6 +58,24 @@ public sealed class AssetMiddlewareTests( AssetFixture fixture ) : IClassFixture
         Assert.Equal( "app GET /assets/nope-12345678.css", missing.Body );
     }
 
+    [Fact]
+    public async Task Current_rails_overlay_urls_serve_the_pinned_bytes( )
+    {
+        await using var app = await StartAsync( );
+
+        foreach ( var overlay in CurrentRailsAssetExpectations.Overlays )
+        {
+            var response = await RawHttp.SendAsync( app.Address, "GET", "/assets/" + overlay.DigestedPath );
+
+            Assert.Equal( 200, response.Status );
+            Assert.Equal( "text/javascript", response.Headers["content-type"] );
+            Assert.Equal( StaticFiles.CacheControl, response.Headers["cache-control"] );
+            Assert.Equal( overlay.ByteLength.ToString( CultureInfo.InvariantCulture ), response.Headers["content-length"] );
+            // RawHttp decodes as Latin-1, so this recovers every received byte without UTF-8 replacement.
+            Assert.Equal( overlay.Sha256, Convert.ToHexStringLower( SHA256.HashData( Encoding.Latin1.GetBytes( response.Body ) ) ) );
+        }
+    }
+
     private sealed class Host( WebApplication app, Uri address ) : IAsyncDisposable
     {
         public Uri Address { get; } = address;
@@ -64,6 +85,33 @@ public sealed class AssetMiddlewareTests( AssetFixture fixture ) : IClassFixture
             await app.StopAsync( CancellationToken.None );
             await app.DisposeAsync( );
         }
+    }
+
+    [Theory]
+    [InlineData( "GET", null, 200 )]
+    [InlineData( "HEAD", null, 200 )]
+    [InlineData( "GET", "bytes=0-0", 206 )]
+    [InlineData( "HEAD", "bytes=0-0", 206 )]
+    [InlineData( "GET", "bytes=999-", 416 )]
+    [InlineData( "HEAD", "bytes=999-", 416 )]
+    [InlineData( "GET", "bytes=invalid", 200 )]
+    [InlineData( "HEAD", "bytes=invalid", 200 )]
+    public async Task Static_validation_honors_wildcard_dates_and_if_none_match_precedence( string method, string? range, int unmatchedStatus )
+    {
+        await using var app = await StartAsync( );
+        var modified = fixture.Get( "/robots.txt" ).Header( "last-modified" )!;
+        var later = DateTimeOffset.Parse( modified, CultureInfo.InvariantCulture ).AddMinutes( 1 ).ToString( "r", CultureInfo.InvariantCulture );
+
+        (string, string)[] ranges = range is null ? [] : [("Range", range)];
+        var nonmatch = await RawHttp.SendAsync( app.Address, method, "/robots.txt", [("If-None-Match", "\"other\""), ("If-Modified-Since", modified), .. ranges] );
+        var wildcard = await RawHttp.SendAsync( app.Address, method, "/robots.txt", [("If-None-Match", "*"), .. ranges] );
+        var dated = await RawHttp.SendAsync( app.Address, method, "/robots.txt", [("If-Modified-Since", later), .. ranges] );
+
+        Assert.Equal( unmatchedStatus, nonmatch.Status );
+        Assert.Equal( 304, wildcard.Status );
+        Assert.Equal( 304, dated.Status );
+        Assert.Empty( wildcard.Body );
+        Assert.Empty( dated.Body );
     }
 
     private async Task<Host> StartAsync( )

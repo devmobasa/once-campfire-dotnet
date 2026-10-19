@@ -27,10 +27,13 @@ public sealed class PublicOriginTests
 
     private static readonly long Third = SliceAppFactory.Id( "third" );
 
-    [Fact]
-    public async Task With_tls_domain_a_forged_host_changes_neither_a_cached_fragment_nor_a_broadcast( )
+    [Theory]
+    [InlineData( null, "https://chat.example.com", true )]
+    [InlineData( "http://public.example.com:8080", "http://public.example.com:8080", false )]
+    [InlineData( "https://public.example.com:8443", "https://public.example.com:8443", true )]
+    public async Task A_configured_origin_keeps_forged_hosts_out_of_cached_fragments_and_broadcasts( string? configured, string origin, bool tls )
     {
-        await using var factory = new TlsDomainAppFactory( );
+        await using var factory = new TlsDomainAppFactory( configured, tls );
         using var david = await factory.SignedInClientAsync( "david@37signals.com" );
         using var broadcasts = await RoomBroadcastTap.StartAsync( factory, Designers );
         var cachedBefore = factory.App.Fragments.Count;
@@ -44,20 +47,23 @@ public sealed class PublicOriginTests
         var broadcast = await broadcasts.NextHtmlAsync( );
 
         Assert.Equal( HttpStatusCode.OK, forged.Status );
-        Assert.Contains( CopyLink( $"https://{PublicDomain}", Third ), forged.Body, StringComparison.Ordinal );
+        Assert.Contains( CopyLink( origin, Third ), forged.Body, StringComparison.Ordinal );
         Assert.True( cachedAfterForged > cachedBefore, "the forged request rendered and stored the fragments" );
         Assert.Equal( cachedAfterForged, cachedAfterHonest );
-        Assert.Contains( CopyLink( $"https://{PublicDomain}", Third ), honest.Body, StringComparison.Ordinal );
+        Assert.Contains( CopyLink( origin, Third ), honest.Body, StringComparison.Ordinal );
         Assert.DoesNotContain( ForgedHost, honest.Body, StringComparison.Ordinal );
         Assert.Equal( HttpStatusCode.OK, posted.Status );
-        Assert.Contains( CopyLink( $"https://{PublicDomain}", created ), broadcast, StringComparison.Ordinal );
+        Assert.Contains( CopyLink( origin, created ), broadcast, StringComparison.Ordinal );
         Assert.DoesNotContain( ForgedHost, broadcast, StringComparison.Ordinal );
     }
 
-    [Fact]
-    public async Task With_tls_domain_the_cached_bot_api_json_uses_the_public_origin( )
+    [Theory]
+    [InlineData( null, "https://chat.example.com", true )]
+    [InlineData( "http://public.example.com:8080", "http://public.example.com:8080", false )]
+    [InlineData( "https://public.example.com:8443", "https://public.example.com:8443", true )]
+    public async Task Cached_bot_api_json_uses_the_configured_public_origin( string? configured, string origin, bool tls )
     {
-        await using var factory = new TlsDomainAppFactory( );
+        await using var factory = new TlsDomainAppFactory( configured, tls );
         using var bot = factory.Client( );
         var watercooler = SliceAppFactory.Id( "watercooler" );
 
@@ -65,21 +71,42 @@ public sealed class PublicOriginTests
 
         var last = JsonNode.Parse( forged.Body )!.AsArray( )[^1]!;
         Assert.Equal( HttpStatusCode.OK, forged.Status );
-        Assert.Equal( $"https://{PublicDomain}/rooms/{watercooler}/messages/{last["id"]!.GetValue<long>( )}", last["url"]!.GetValue<string>( ) );
-        Assert.StartsWith( $"https://{PublicDomain}/users/", last["creator"]!["avatar_url"]!.GetValue<string>( ), StringComparison.Ordinal );
+        Assert.Equal( $"{origin}/rooms/{watercooler}/messages/{last["id"]!.GetValue<long>( )}", last["url"]!.GetValue<string>( ) );
+        Assert.StartsWith( $"{origin}/users/", last["creator"]!["avatar_url"]!.GetValue<string>( ), StringComparison.Ordinal );
     }
 
-    [Fact]
-    public async Task With_tls_domain_link_previews_are_judged_against_the_public_host( )
+    [Theory]
+    [InlineData( null, "chat.example.com", true )]
+    [InlineData( "http://public.example.com:8080", "public.example.com", false )]
+    [InlineData( "https://public.example.com:8443", "public.example.com", true )]
+    public async Task Link_previews_are_judged_against_the_configured_public_host( string? configured, string host, bool tls )
     {
-        await using var factory = new TlsDomainAppFactory( );
+        await using var factory = new TlsDomainAppFactory( configured, tls );
 
         var (forged, detached) = await factory.App.Database.ReadAsync(
             db => (factory.App.RichText( db, ForgedHost ).RequestHost, factory.App.RichText( db, requestHost: null ).RequestHost),
             TestContext.Current.CancellationToken );
 
-        Assert.Equal( PublicDomain, forged );
+        Assert.Equal( host, forged );
         Assert.Null( detached );
+    }
+
+    [Fact]
+    public async Task Without_tls_domain_posted_and_broadcast_copy_links_keep_the_request_port( )
+    {
+        await using var factory = new SliceAppFactory( );
+        using var david = await factory.SignedInClientAsync( "david@37signals.com" );
+        using var broadcasts = await RoomBroadcastTap.StartAsync( factory, Designers );
+        var page = await david.GetAsync( Routes.Room( Designers ) );
+        var origin = $"http://127.0.0.1:{factory.Port}";
+
+        var posted = await PostWithHostAsync( david, SliceClient.MetaToken( page.Body ), $"127.0.0.1:{factory.Port}", "A message with a port-aware copy link" );
+        var created = factory.Scalar<long>( "SELECT max(id) FROM messages" );
+        var broadcast = await broadcasts.NextHtmlAsync( );
+
+        Assert.Equal( HttpStatusCode.OK, posted.Status );
+        Assert.Contains( CopyLink( origin, created ), posted.Body, StringComparison.Ordinal );
+        Assert.Contains( CopyLink( origin, created ), broadcast, StringComparison.Ordinal );
     }
 
     [Fact]
@@ -131,12 +158,13 @@ public sealed class PublicOriginTests
     }
 
     /// <summary>The app as Thruster runs it with TLS: <c>TLS_DOMAIN</c> names the public host.</summary>
-    private sealed class TlsDomainAppFactory : SliceAppFactory
+    private sealed class TlsDomainAppFactory( string? origin = null, bool tls = true ) : SliceAppFactory
     {
         protected override void ConfigureWebHost( IWebHostBuilder builder )
         {
             base.ConfigureWebHost( builder );
-            builder.UseSetting( CampfireOptions.TlsDomainVariable, $" {PublicDomain}, other.example.com" );
+            builder.UseSetting( CampfireOptions.TlsDomainVariable, tls ? $" {PublicDomain}, other.example.com" : "" );
+            builder.UseSetting( "CAMPFIRE_PUBLIC_ORIGIN", origin );
         }
     }
 

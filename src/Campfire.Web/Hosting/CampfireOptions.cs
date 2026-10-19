@@ -30,6 +30,8 @@ public sealed class CampfireOptions
     public const string FragmentCacheVariable = "CAMPFIRE_FRAGMENT_CACHE_MB";
     public const string ResponseCacheVariable = "CAMPFIRE_RESPONSE_CACHE_MB";
     public const string MessageIndexVariable = "CAMPFIRE_MESSAGE_INDEX";
+    public const string UpdatedMessageIndexVariable = "CAMPFIRE_MESSAGE_UPDATED_INDEX";
+    public const string PublicOriginVariable = "CAMPFIRE_PUBLIC_ORIGIN";
 
     /// <summary>Thruster's list of the names it gets certificates for; setting it turns on TLS.</summary>
     public const string TlsDomainVariable = "TLS_DOMAIN";
@@ -50,6 +52,8 @@ public sealed class CampfireOptions
     private const int MaximumCacheMegabytes = 4096;
 
     public bool CreateMessageIndex { get; init; } = true;
+
+    public bool CreateUpdatedMessageIndex { get; init; }
 
     public string? VapidPublicKey { get; init; }
 
@@ -116,19 +120,19 @@ public sealed class CampfireOptions
     public long ResponseCacheBytes { get; init; } = Megabytes( DefaultResponseCacheMegabytes );
 
     /// <summary>
-    /// The host of the public origin: the first name in Thruster's <c>TLS_DOMAIN</c>, lower-cased, or
-    /// <see langword="null"/> when TLS is off. Absolute URLs in cached fragments and in broadcasts, and the host that
-    /// link previews may not point back at, come from it instead of the request's <c>Host</c>, so a forged header can't
-    /// reach other users. Without <c>TLS_DOMAIN</c> (plain HTTP, as in the parity
-    /// harness) the request's origin is used, as Rails does.
+    /// The configured public hostname. An explicit public origin takes precedence over the first TLS domain.
+    /// Shared URLs and link-preview loop checks use this host instead of a request's Host header.
+    /// Without either setting, URLs follow the request origin.
     /// </summary>
     public string? PublicHost { get; init; }
 
     /// <summary>
-    /// <c>https://</c> and <see cref="PublicHost"/>: Thruster serves the names in <c>TLS_DOMAIN</c> over HTTPS, and
-    /// clients reach it on the default port (a remapped <c>HTTPS_PORT</c> is not reflected).
+    /// The validated HTTP(S) public origin, including its public port when configured.
+    /// Otherwise the first TLS domain uses HTTPS on its default port.
     /// </summary>
-    public string? PublicOrigin => PublicHost is null ? null : "https://" + PublicHost;
+    public string? PublicOrigin => ConfiguredPublicOrigin ?? (PublicHost is null ? null : "https://" + PublicHost);
+
+    private string? ConfiguredPublicOrigin { get; init; }
 
     /// <summary>Reads the options from configuration (environment variables by their plain names).</summary>
     public static CampfireOptions FromConfiguration( IConfiguration configuration )
@@ -139,6 +143,8 @@ public sealed class CampfireOptions
 
         int Number( string name, int fallback, int min, int max ) => ParseNumber( Present( name ), name, fallback, min, max );
 
+        var tlsHost = FirstTlsDomain( configuration[ThrusterVariablePrefix + TlsDomainVariable] ?? configuration[TlsDomainVariable] );
+        var publicOrigin = ParsePublicOrigin( configuration[PublicOriginVariable] );
         return new CampfireOptions
         {
             VapidPublicKey = configuration[VapidPublicKeyVariable],
@@ -158,8 +164,10 @@ public sealed class CampfireOptions
             StoragePath = Present( StoragePathVariable ),
             FragmentCacheBytes = Megabytes( Number( FragmentCacheVariable, DefaultFragmentCacheMegabytes, 1, MaximumCacheMegabytes ) ),
             ResponseCacheBytes = Megabytes( Number( ResponseCacheVariable, DefaultResponseCacheMegabytes, 0, MaximumCacheMegabytes ) ),
-            PublicHost = FirstTlsDomain( configuration[ThrusterVariablePrefix + TlsDomainVariable] ?? configuration[TlsDomainVariable] ),
+            PublicHost = publicOrigin?.Host ?? tlsHost,
+            ConfiguredPublicOrigin = publicOrigin?.GetLeftPart( UriPartial.Authority ),
             CreateMessageIndex = MessageIndexEnabled( configuration[MessageIndexVariable] ),
+            CreateUpdatedMessageIndex = MessageIndexEnabled( configuration[UpdatedMessageIndexVariable], UpdatedMessageIndexVariable, fallback: false ),
         };
     }
 
@@ -184,19 +192,55 @@ public sealed class CampfireOptions
         return first.ToLowerInvariant( );
     }
 
+    private static Uri? ParsePublicOrigin( string? value )
+    {
+        if ( value is null )
+        {
+            return null;
+        }
+
+        if ( value.Any( char.IsControl ) )
+        {
+            throw new InvalidOperationException( $"{PublicOriginVariable} must be an HTTP(S) origin without credentials, path, query, or fragment." );
+        }
+
+        var text = value.Trim( );
+        if ( text.Length == 0 )
+        {
+            return null;
+        }
+
+        if ( text.Any( char.IsWhiteSpace ) || text.Contains( '\\', StringComparison.Ordinal )
+            || !Uri.TryCreate( text, UriKind.Absolute, out var origin ) || origin.Scheme is not ("http" or "https")
+            || origin.HostNameType is not (UriHostNameType.Dns or UriHostNameType.IPv4 or UriHostNameType.IPv6)
+            || origin.UserInfo.Length != 0 || origin.Port is < 1 or > 65535 )
+        {
+            throw new InvalidOperationException( $"{PublicOriginVariable} must be an HTTP(S) origin without credentials, path, query, or fragment." );
+        }
+
+        var authority = text.AsSpan( text.IndexOf( "://", StringComparison.Ordinal ) + 3 );
+        var suffix = authority.IndexOfAny( '/', '?', '#' );
+        if ( suffix >= 0 && !authority[suffix..].SequenceEqual( "/" ) )
+        {
+            throw new InvalidOperationException( $"{PublicOriginVariable} must be an HTTP(S) origin without credentials, path, query, or fragment." );
+        }
+
+        return origin;
+    }
+
     /// <summary>The size of Resque's one shared pool in <c>config/resque-pool.yml</c>: half the CPUs, rounded up.</summary>
     public static int DefaultJobConcurrency( ) => Math.Max( 1, ( int ) Math.Ceiling( System.Environment.ProcessorCount * 0.5 ) );
 
     private static long Megabytes( int megabytes ) => megabytes * 1024L * 1024L;
 
-    private static bool MessageIndexEnabled( string? configured )
+    private static bool MessageIndexEnabled( string? configured, string variable = MessageIndexVariable, bool fallback = true )
     {
         if ( configured is not (null or "1" or "true" or "0" or "false") )
         {
-            throw new InvalidOperationException( $"{MessageIndexVariable} must be true/false or 1/0." );
+            throw new InvalidOperationException( $"{variable} must be true/false or 1/0." );
         }
 
-        return configured is null or "1" or "true";
+        return configured is null ? fallback : configured is "1" or "true";
     }
 
     /// <summary>A whole number between <paramref name="min"/> and <paramref name="max"/>; <paramref name="fallback"/> when unset.</summary>

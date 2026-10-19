@@ -13,17 +13,16 @@ namespace Campfire.Web.Endpoints.ActiveStorage;
 public static partial class BlobsProxyEndpoints
 {
     /// <summary>
-    /// A <c>Range</c> request gets <c>send_blob_byte_range_data</c>; anything else <c>http_cache_forever</c> around
-    /// <c>Accept-Ranges</c>, <c>Content-Length</c> and <c>send_blob_stream</c>.
+    /// Checks file availability and validators before selecting byte ranges or streaming the whole blob.
     /// </summary>
     private static Task<FrontendResult> ShowAsync( RequestContext requestContext )
     {
         var blob = ActiveStorageBase.BlobOf( requestContext );
-        if ( requestContext.Request.Header( HeaderNames.Range ) is { } range && !string.IsNullOrWhiteSpace( range ) )
+        var response = ActiveStorageBase.SendBlobStream( requestContext, blob, requestContext.Param( ParamNames.ActiveStorage.Disposition ) );
+        response.Live = true;
+        if ( response.Status != StatusCodes.Status200OK )
         {
-            var ranged = ActiveStorageBase.ToResponse( BlobStreaming.ByteRangeData( requestContext.App( ).Storage.Disk, blob, range ) );
-            ranged.Live = true;
-            return Task.FromResult( ranged );
+            return Task.FromResult( response );
         }
 
         if ( ActiveStorageBase.HttpCacheForever( requestContext ) is { } notModified )
@@ -32,14 +31,15 @@ public static partial class BlobsProxyEndpoints
             return Task.FromResult( notModified );
         }
 
-        var response = ActiveStorageBase.SendBlobStream( requestContext, blob, requestContext.Param( ParamNames.ActiveStorage.Disposition ) );
-        if ( response.Status == StatusCodes.Status200OK )
+        if ( requestContext.Request.Header( HeaderNames.Range ) is { } range && !string.IsNullOrWhiteSpace( range ) )
         {
-            response.Headers.AcceptRanges = "bytes";
-            response.Headers.ContentLength = blob.ByteSize;
+            var ranged = ActiveStorageBase.ToResponse( BlobStreaming.ByteRangeData( requestContext.App( ).Storage.Disk, blob, range ) );
+            ranged.Live = true;
+            return Task.FromResult( ranged );
         }
 
-        response.Live = true;
+        response.Headers.AcceptRanges = "bytes";
+        response.Headers.ContentLength = blob.ByteSize;
         return Task.FromResult( response );
     }
 }

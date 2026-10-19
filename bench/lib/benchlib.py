@@ -49,7 +49,7 @@ def build_loadgen():
 # --- Seed ------------------------------------------------------------------------------------
 
 def snapshot_seed(dest):
-    """Copies the seed once per run (the parity agents regenerate it) and neuters outbound
+    """Copies the seed once per run (the parity tools regenerate it) and neuters outbound
     deliveries."""
     shutil.rmtree(dest, ignore_errors=True)
     shutil.copytree(SEED, dest)

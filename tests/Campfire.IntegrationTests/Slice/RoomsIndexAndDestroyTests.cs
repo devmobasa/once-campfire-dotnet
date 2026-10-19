@@ -53,6 +53,7 @@ public sealed class RoomsIndexAndDestroyTests
         var reply = await client.SubmitFormAsync( HttpMethod.Delete, path, token, accept: "text/html" );
 
         Assert.Equal( HttpStatusCode.Found, reply.Status );
+        await SliceWait.UntilAsync( ( ) => shared.Scalar<long>( $"SELECT count(*) FROM rooms WHERE id = {Designers}" ) == 0 );
         Assert.Equal( 0, shared.Scalar<long>( $"SELECT count(*) FROM rooms WHERE id = {Designers}" ) );
     }
 
@@ -108,12 +109,34 @@ public sealed class RoomsIndexAndDestroyTests
 
         Assert.Equal( HttpStatusCode.Found, reply.Status );
         Assert.Equal( factory.BaseAddress.ToString( ), reply.Location );
-        Assert.Equal( 0, factory.Scalar<long>( $"SELECT count(*) FROM rooms WHERE id = {Designers}" ) );
         Assert.Equal( 0, factory.Scalar<long>( $"SELECT count(*) FROM memberships WHERE room_id = {Designers}" ) );
+        await SliceWait.UntilAsync( ( ) => factory.Scalar<long>( $"SELECT count(*) FROM rooms WHERE id = {Designers}" ) == 0 );
         Assert.Equal( 0, factory.Scalar<long>( $"SELECT count(*) FROM messages WHERE id IN ({messageIds})" ) );
         Assert.Equal( 0, factory.Scalar<long>( $"SELECT count(*) FROM boosts WHERE message_id IN ({messageIds})" ) );
-        Assert.Equal( [$"stream rooms remove list_rooms_closed_{Designers}"], factory.Events.Only( "stream" ) );
+        var removals = factory.Events.Only( "stream" );
+        Assert.Contains( $"stream rooms remove list_rooms_closed_{Designers}", removals );
+        Assert.Contains( $"stream rooms remove list_rooms_open_{Designers}", removals );
         client.Dispose( );
+    }
+
+    [Fact]
+    public async Task Destroying_an_open_room_removes_its_original_sidebar_target( )
+    {
+        using var factory = new SliceAppFactory( );
+        var roomId = SliceAppFactory.Id( "pets" );
+        var (client, token) = await factory.SignedInWithPageTokenAsync( "david@37signals.com", Routes.Room( roomId ) );
+        using var ownedClient = client;
+        var page = await client.GetAsync( Routes.UserSidebar );
+        var target = $"list_rooms_open_{roomId}";
+        Assert.Contains( $"id=\"{target}\"", page.Body, StringComparison.Ordinal );
+        using var taps = StreamTaps.On( factory, StreamTaps.Rooms );
+
+        var reply = await client.SubmitFormAsync( HttpMethod.Delete, Routes.Room( roomId ), token );
+
+        Assert.Equal( HttpStatusCode.Found, reply.Status );
+        Assert.Contains( taps.Payloads, payload => payload.Payload.Contains( $"target=\"{target}\"", StringComparison.Ordinal ) );
+        Assert.Contains( taps.Payloads, payload => payload.Payload.Contains( $"target=\"list_rooms_closed_{roomId}\"", StringComparison.Ordinal ) );
+        await SliceWait.UntilAsync( ( ) => factory.Scalar<long>( $"SELECT COUNT(*) FROM rooms WHERE id={roomId}" ) == 0 );
     }
 
     [Fact]
@@ -131,6 +154,7 @@ public sealed class RoomsIndexAndDestroyTests
             var allowed = await client.SubmitFormAsync( HttpMethod.Delete, Routes.Room( Designers ), token );
 
             Assert.Equal( HttpStatusCode.Found, allowed.Status );
+            await SliceWait.UntilAsync( ( ) => factory.Scalar<long>( $"SELECT count(*) FROM rooms WHERE id = {Designers}" ) == 0 );
             Assert.Equal( 0, factory.Scalar<long>( $"SELECT count(*) FROM rooms WHERE id = {Designers}" ) );
         }
     }

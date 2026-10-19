@@ -355,7 +355,8 @@ internal static class NativeSmoke
                 HttpMethod.Get,
                 "/up",
                 HttpStatusCode.OK,
-                ( response, body ) => response.Content.Headers.ContentType?.MediaType == "text/plain" && body.AsSpan( ).SequenceEqual( "OK"u8 )
+                ( response, body ) => response.Content.Headers.ContentType?.ToString( ) == "text/html; charset=utf-8"
+                    && body.AsSpan( ).SequenceEqual( "<!DOCTYPE html><html><body style=\"background-color: green\"></body></html>"u8 )
             ),
             ("HEAD on a GET route, no body (Rack::Head)", HttpMethod.Head, "/up", HttpStatusCode.OK, ( _, body ) => body.Length == 0),
             (
@@ -545,7 +546,7 @@ internal static class NativeSmoke
 
     /// <summary>The authentication cookie, HttpOnly and SameSite=Lax.</summary>
     private static bool IsNativeAuthCookie( string setCookie ) =>
-        setCookie.StartsWith( ".Campfire.Auth=", StringComparison.Ordinal )
+        setCookie.StartsWith( "session_token=", StringComparison.Ordinal )
         && setCookie.Contains( "httponly", StringComparison.OrdinalIgnoreCase )
         && setCookie.Contains( "samesite=lax", StringComparison.OrdinalIgnoreCase );
 

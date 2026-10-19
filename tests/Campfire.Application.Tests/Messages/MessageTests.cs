@@ -84,7 +84,7 @@ public sealed partial class MessageTests
     }
 
     [Fact]
-    public async Task Reachable_search_only_finds_messages_in_the_users_rooms_newest_hundred_oldest_first( )
+    public async Task Reachable_search_finds_only_messages_in_the_users_rooms( )
     {
         using var testDatabase = await TestDatabase.CreateAsync( );
         var message = await testDatabase.PostMessageAsync( "designers", "david", "hovercraft", "earth" );

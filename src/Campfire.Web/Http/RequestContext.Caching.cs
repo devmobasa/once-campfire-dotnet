@@ -119,25 +119,6 @@ public sealed partial class RequestContext
     };
 
     /// <summary><c>request.fresh?(response)</c> with <c>strict_freshness</c> (the 8.0 default).</summary>
-    private bool IsFresh( )
-    {
-        if ( Request.Header( HeaderNames.IfNoneMatch ) is { } ifNoneMatch )
-        {
-            var etag = ResponseHeaders.ETag.ToString( );
-            if ( etag.Length == 0 )
-            {
-                return false;
-            }
-
-            var validators = ifNoneMatch.Split( ',' ).Select( validator => validator.Trim( ) );
-            return validators.Any( validator => validator == etag || validator == "*" );
-        }
-
-        if ( HttpDate.Parse( Request.Header( HeaderNames.IfModifiedSince ) ) is { } since )
-        {
-            return HttpDate.Parse( ResponseHeaders.LastModified.ToString( ) ) is { } lastModified && since >= lastModified;
-        }
-
-        return false;
-    }
+    private bool IsFresh( ) => HttpMethodChecks.IsGetOrHead( Request.Method )
+        && RackConditionalGet.IsFresh( Request.Headers, ResponseHeaders.ETag.ToString( ), ResponseHeaders.LastModified.ToString( ) );
 }

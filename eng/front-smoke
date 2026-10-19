@@ -121,12 +121,15 @@ try
     }
 
     using var plain = new HttpClient( new HttpClientHandler { AllowAutoRedirect = false } );
-    using var redirectRequest = new HttpRequestMessage( HttpMethod.Get, $"http://127.0.0.1:{httpPort}/up" );
+    using var health = await plain.GetAsync( $"http://127.0.0.1:{httpPort}/up", timeout.Token );
+    await HealthResponse.ValidateAsync( health, timeout.Token );
+
+    using var redirectRequest = new HttpRequestMessage( HttpMethod.Get, $"http://127.0.0.1:{httpPort}/session/new" );
     redirectRequest.Headers.Host = domain;
     using var redirect = await plain.SendAsync( redirectRequest, timeout.Token );
-    using var rejected = await plain.GetAsync( $"http://127.0.0.1:{httpPort}/up", timeout.Token );
+    using var rejected = await plain.GetAsync( $"http://127.0.0.1:{httpPort}/session/new", timeout.Token );
     if ( redirect.StatusCode != HttpStatusCode.MovedPermanently
-        || redirect.Headers.Location?.AbsoluteUri != "https://" + domain + "/up"
+        || redirect.Headers.Location?.AbsoluteUri != "https://" + domain + "/session/new"
         || rejected.StatusCode != HttpStatusCode.MisdirectedRequest
         || await File.ReadAllTextAsync( Path.Combine( certificates, domain ), timeout.Token ) != pem )
     {
@@ -155,4 +158,17 @@ finally
 
     await Task.WhenAll( stdout, stderr );
     Directory.Delete( storage, recursive: true );
+}
+
+internal static class HealthResponse
+{
+    public static async Task ValidateAsync( HttpResponseMessage response, CancellationToken cancellationToken )
+    {
+        if ( response.StatusCode != HttpStatusCode.OK
+            || response.Content.Headers.ContentType?.ToString( ) != "text/html; charset=utf-8"
+            || await response.Content.ReadAsStringAsync( cancellationToken ) != "<!DOCTYPE html><html><body style=\"background-color: green\"></body></html>" )
+        {
+            throw new InvalidDataException( "Native HTTP health exemption failed validation." );
+        }
+    }
 }

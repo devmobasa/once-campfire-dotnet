@@ -18,6 +18,8 @@
     <PackageVersion Include="AngleSharp" Version="1.8.2" />
     <!-- Identity V3 password hashing. -->
     <PackageVersion Include="Microsoft.Extensions.Identity.Core" Version="11.0.0-rc.2.26504.105" />
+    <!-- Imported Rails bcrypt verification; password creation remains Identity V3. -->
+    <PackageVersion Include="BCrypt.Net-Next" Version="4.2.1" />
     <!-- Media: the libvips 8.16 binding line, without NetVips.Native. -->
     <PackageVersion Include="NetVips" Version="3.0.1" />
     <!-- HTML templates without MVC. -->

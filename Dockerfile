@@ -7,10 +7,11 @@
 #
 # Two variants of the same code (docs/development.md), as final stages:
 #
-#   docker build -t campfire-dotnet:aot --build-arg APP_VERSION=... --build-arg GIT_REVISION=... .
-#       `aot`, the default (last stage): the Native AOT binary; the runtime stage has no .NET runtime.
-#   docker build -t campfire-dotnet:jit --target jit --build-arg APP_VERSION=... --build-arg GIT_REVISION=... .
-#       `jit`: framework-dependent on the pinned ASP.NET Core runtime, compiled ReadyToRun.
+#   docker build -t campfire-dotnet:app --build-arg APP_VERSION=... --build-arg GIT_REVISION=... .
+#       `jit`, the default (last stage): ReadyToRun on the pinned ASP.NET Core runtime.
+#       JIT is faster on the measured page and posting workloads.
+#   docker build -t campfire-dotnet:aot --target aot --build-arg APP_VERSION=... --build-arg GIT_REVISION=... .
+#       `aot`: less memory, faster startup and no .NET runtime in the image.
 #
 # Pinned build dependencies (PROVENANCE.md and docs/development.md):
 #   * debian:trixie-slim by index digest, and every apt package from snapshot.debian.org at the
@@ -190,8 +191,17 @@ EXPOSE 80 443
 CMD ["bin/boot"]
 
 
-# `docker build --target jit`: the ASP.NET Core runtime runs /app/campfire.dll. `campfire [command]`
-# runs the app; processes show as `dotnet`.
+# `docker build --target aot`: the Native AOT binary needs no .NET runtime.
+FROM runtime AS aot
+COPY --from=build-aot /out /app
+COPY --chmod=755 <<'EOF' /usr/local/bin/campfire
+#!/bin/sh
+exec /app/campfire "$@"
+EOF
+
+
+# The default jit stage: the ASP.NET Core runtime runs /app/campfire.dll. `campfire [command]`
+# runs the app. Processes show as `dotnet`.
 FROM runtime AS jit
 COPY --from=downloads /out/dotnet /usr/share/dotnet
 COPY --from=build-jit /out /app
@@ -202,13 +212,3 @@ EOF
 ENV DOTNET_ROOT=/usr/share/dotnet \
     DOTNET_NOLOGO=1 \
     DOTNET_CLI_TELEMETRY_OPTOUT=1
-
-
-# The default: the Native AOT binary, with no .NET runtime in the image. `campfire [command]` is the
-# binary itself.
-FROM runtime AS aot
-COPY --from=build-aot /out /app
-COPY --chmod=755 <<'EOF' /usr/local/bin/campfire
-#!/bin/sh
-exec /app/campfire "$@"
-EOF

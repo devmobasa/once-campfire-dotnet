@@ -109,14 +109,19 @@ public sealed class PresenceTests
         await cable.PerformAsync( Presence( ), new JsonObject { ["action"] = "absent" } );
         var absent = await WaitForMembershipAsync( factory, membership => membership.ConnectedAt is null );
         factory.Execute( $"UPDATE memberships SET unread_at = '2026-09-26 13:00:00' WHERE id = {JasonDesigners}" );
+        factory.Clock.Advance( TimeSpan.FromMilliseconds( 125 ) );
         await cable.PerformAsync( Presence( ), new JsonObject { ["action"] = "present" } );
         var readOnPresent = await cable.NextTextAsync( );
         var present = await MembershipAsync( factory );
 
-        var read = $"{{\"identifier\":{CableProtocol.EncodeIdentifier( reads )},\"message\":{{\"room_id\":{Designers}}}}}";
-        Assert.Equal( [read], readOnSubscribe );
+        var subscribedRead = JsonNode.Parse( Assert.Single( readOnSubscribe ) )!["message"]!;
+        var presentRead = JsonNode.Parse( readOnPresent )!["message"]!;
+        Assert.Equal( Designers, subscribedRead["room_id"]!.GetValue<long>( ) );
+        Assert.NotNull( subscribedRead["at"] );
+        Assert.Equal( 1790428492d, subscribedRead["at"]!.GetValue<double>( ) );
+        Assert.Equal( Designers, presentRead["room_id"]!.GetValue<long>( ) );
+        Assert.Equal( 1790428492.125d, presentRead["at"]!.GetValue<double>( ) );
         Assert.Equal( 0, absent.Connections );
-        Assert.Equal( read, readOnPresent );
         Assert.Equal( 1, present.Connections );
         Assert.NotNull( present.ConnectedAt );
         Assert.Null( present.UnreadAt );

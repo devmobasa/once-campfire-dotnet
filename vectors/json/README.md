@@ -1,6 +1,8 @@
 # JSON vectors
 
-Exact bytes of every JSON output of the Rails reference (plan section 5.1), for the .NET ActiveSupport-compatible JSON writer and the endpoints that use it. Each `<name>.json` holds the bytes as Rails produced them; `index.json` records, for each one, where it comes from, the request (method, path, parameters or raw body), the status, the relevant response headers, its size and SHA-256, and the records the generator created.
+These files contain the Rails reference's JSON output bytes for the .NET JSON writer and its endpoints.
+Each `<name>.json` holds the bytes that Rails produced.
+`index.json` records each source, request, response status, headers, size, SHA-256 and generated record.
 
 ## Generator
 

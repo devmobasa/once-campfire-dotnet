@@ -68,6 +68,26 @@ public sealed class SignInTests
         SliceAssert.SignInChallenge( factory, page, Routes.Room( Designers ) );
     }
 
+    [Fact]
+    public async Task A_Rails_format_session_token_is_signed_out_and_sign_in_replaces_it( )
+    {
+        await using var factory = new SliceAppFactory( );
+        using var client = factory.Client( );
+        var railsCookie = RepositoryPaths.ReadVectorJson( "rails_compat.json" )["signed_cookies"]!["generate"]![0]!["raw"].RequiredString( );
+        client.AddCookie( "session_token", railsCookie );
+        var sessions = factory.Scalar<long>( "SELECT COUNT(*) FROM sessions" );
+
+        SliceAssert.SignInChallenge( factory, await client.GetAsync( Routes.Room( Designers ) ), Routes.Room( Designers ) );
+        Assert.Equal( sessions, factory.Scalar<long>( "SELECT COUNT(*) FROM sessions" ) );
+
+        var signedIn = await client.SignInAsync( "david@37signals.com" );
+
+        Assert.Equal( HttpStatusCode.Found, signedIn.Status );
+        Assert.Contains( "session_token=", signedIn.Raw( "Set-Cookie" ) ?? "", StringComparison.Ordinal );
+        Assert.DoesNotContain( railsCookie, client.CookieHeader, StringComparison.Ordinal );
+        Assert.Equal( HttpStatusCode.OK, (await client.GetAsync( Routes.Room( Designers ) )).Status );
+    }
+
     [Theory]
     [InlineData( false )]
     [InlineData( true )]

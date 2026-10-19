@@ -72,6 +72,7 @@ public static partial class CampfireApplicationSetup
 
         services.AddCampfireWorkers( );
         services.AddAppJobs( options.JobConcurrency );
+        services.AddHostedService<StorageCleanupWorker>( );
 
         services.Replace( ServiceDescriptor.Singleton<IAuthenticationStore, AuthenticationStore>( ) );
         services.Replace( ServiceDescriptor.Singleton<IBanList, BanList>( ) );
@@ -139,7 +140,8 @@ public static partial class CampfireApplicationSetup
             {
                 StorageRoot = paths.Root,
                 Environment = paths.Environment,
-                CreateMessageIndex = provider.GetRequiredService<CampfireOptions>( ).CreateMessageIndex
+                CreateMessageIndex = provider.GetRequiredService<CampfireOptions>( ).CreateMessageIndex,
+                CreateUpdatedMessageIndex = provider.GetRequiredService<CampfireOptions>( ).CreateUpdatedMessageIndex
             };
             return CampfireDatabase.Open(
                 options,

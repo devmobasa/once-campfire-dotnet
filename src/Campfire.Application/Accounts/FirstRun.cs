@@ -22,7 +22,7 @@ public static class FirstRun
     /// transaction first and autosaves the user. After commit, the room's <c>grant_access_to_all_users</c> gives the
     /// administrator a membership, then the user's callbacks run (its <c>grant_membership_to_open_rooms</c> finds it
     /// already there).</item>
-    /// <item><c>room.memberships.grant_to administrator</c>, a single statement outside any transaction.</item>
+    /// <item><c>room.memberships.grant_to administrator</c>, a guard and grant in one immediate transaction.</item>
     /// </list>
     /// </summary>
     /// <exception cref="RecordNotUniqueException">An account exists already.</exception>

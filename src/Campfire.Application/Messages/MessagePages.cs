@@ -96,8 +96,9 @@ public static class MessagePages
         ArgumentNullException.ThrowIfNull( db );
         ArgumentNullException.ThrowIfNull( excluding );
 
+        var order = db.HasUpdatedMessageIndex ? "ORDER BY +messages.created_at DESC LIMIT @limit" : NewestFirst;
         return Reversed( db.Connection.Query<Message>(
-            $"{InRoom} AND messages.id NOT IN (SELECT value FROM json_each(@excluding)) AND messages.updated_at > @time {NewestFirst}",
+            $"{InRoom} AND messages.id NOT IN (SELECT value FROM json_each(@excluding)) AND messages.updated_at > @time {order}",
             new
             {
                 roomId,

@@ -13,8 +13,8 @@
 # 127.0.0.1:N (default 3100). Instances are independent, so several can run side by side on
 # different ports. --time starts the server clock at that instant via libfaketime and lets it tick;
 # with --freeze it stays at that instant.
-# Instances are labelled with their owner, PARITY_OWNER (default: the Claude Code session,
-# CLAUDE_CODE_SESSION_ID, else the user), and `down --all` and `ps` only touch the caller's own;
+# Instances use PARITY_OWNER as their label, defaulting to the user name.
+# `down --all` and `ps` only touch instances with that label.
 # --everyone takes them all. `down --port N` stops that port's instance whoever started it.
 # Containers are limited to PARITY_CPUS (default 2) CPUs and run one Puma worker and one Resque
 # worker.
@@ -44,7 +44,7 @@ NATIVE=$PARITY/.native
 IMAGE=${PARITY_IMAGE:-campfire-reference}
 ENV_FILE=$PARITY/.env.reference
 DEFAULT_PORT=3100
-OWNER=${PARITY_OWNER:-${CLAUDE_CODE_SESSION_ID:-$(id -un)}}
+OWNER=${PARITY_OWNER:-$(id -un)}
 
 die() { echo "reference: $*" >&2; exit 1; }
 log() { echo "reference: $*" >&2; }

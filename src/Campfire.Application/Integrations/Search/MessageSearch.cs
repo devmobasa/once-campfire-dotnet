@@ -10,14 +10,13 @@ namespace Campfire.Application.Integrations.Search;
 /// user belongs to (<c>reachable_messages</c>), and the user's recent searches recorded, trimmed to ten, and cleared.
 /// </summary>
 /// <remarks>
-/// <c>set_messages</c> runs before every action, <c>create</c> and <c>clear</c> included, so a query FTS5 can't parse
-/// fails all three with the <see cref="Microsoft.Data.Sqlite.SqliteException"/> it raises (Rails: 500), before
-/// anything is recorded.
+/// <c>set_messages</c> runs before every action, <c>create</c> and <c>clear</c> included. Search words are quoted
+/// as literal FTS5 terms before those actions run.
 /// </remarks>
 public static class MessageSearch
 {
     /// <summary>
-    /// <c>set_messages</c>: <c>Current.user.reachable_messages.search(query).last(100)</c> when the sanitized query is
+    /// <c>set_messages</c>: <c>Message.search_reachable(user, query)</c> when the sanitized query is
     /// present, else no messages. <paramref name="rawQuery"/> is the raw <c>params[:q]</c>.
     /// </summary>
     public static SearchResults Find( CampfireDb db, long userId, string? rawQuery )

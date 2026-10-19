@@ -1,10 +1,12 @@
 # Deployment
 
-The default Docker image runs a Native AOT application with Kestrel's public HTTP/TLS listeners. The `jit` target runs the same source on the pinned ASP.NET Core runtime. Validate the native platform artifact on the deployment architecture before use.
+The default Docker image runs JIT on the pinned ASP.NET Core runtime. JIT is faster on the measured page and posting workloads. The `aot` target uses less memory, starts faster and needs no .NET runtime. Both builds use the same source and Kestrel public HTTP/TLS listeners. Validate each artifact on its deployment architecture.
 
-Run one application process. Persist `/rails/storage`, which holds the database, the files and the native Data Protection keys (in `keys/`). If you lose the key ring, all cookies and protected URLs become invalid. Real-time broadcasts and connection revocation stay inside one process, so shared storage and keys do not coordinate replicas. This app is for fresh installations.
+Run one application process. Persist `/rails/storage`, which holds the database, uploaded files and native Data Protection keys in `keys/`. Losing this key ring invalidates native cookies and protected URLs. Real-time broadcasts and connection revocation stay inside one process. Shared storage and keys do not coordinate replicas. Rails bcrypt passwords support sign-in without rewriting stored digests. Set the original `SECRET_KEY_BASE` to keep Rails avatar URLs working. Other Rails cookies and signed URLs do not work.
 
 ## HTTPS and certificates
+
+The `/up` health page remains available over HTTP without authentication or a database query.
 
 Set `TLS_DOMAIN` to your domain, expose ports 80 and 443 and point DNS at the server. Multiple names may be comma-separated; the first determines canonical shared URLs. Kestrel negotiates HTTP/1.1 and HTTP/2. Port 80 serves HTTP-01 challenges and redirects configured hosts to HTTPS.
 
@@ -19,7 +21,9 @@ Front settings check `THRUSTER_`-prefixed names first, then the unprefixed name.
 | `HTTP_PORT` / `HTTPS_PORT` | 80 / 443 | Public listeners; TLS requires configured domains |
 | `TARGET_PORT` | 3000 | Direct plain-HTTP listener; keep it private |
 | `TLS_DOMAIN` | empty | Comma-separated certificate names and canonical origin |
+| `CAMPFIRE_PUBLIC_ORIGIN` | unset | Explicit HTTP or HTTPS origin for shared URLs, including custom ports. It overrides the TLS-derived origin without changing listeners or certificate settings. |
 | `CAMPFIRE_STORAGE_PATH` | `storage` under the content root (`/rails/storage` in Docker) | Database, uploaded files and Data Protection keys |
+| `SECRET_KEY_BASE` | unset | Original Rails secret for imported avatar URLs only. Native sessions and other protected URLs use the persisted Data Protection keys. |
 | `STORAGE_PATH` | `./storage/thruster` | Certificate storage, separate from `CAMPFIRE_STORAGE_PATH` |
 | `ACME_DIRECTORY` | Let's Encrypt production | ACME directory URL |
 | `EAB_KID` / `EAB_HMAC_KEY` | empty | External account binding; key is base64url |
@@ -33,6 +37,7 @@ Front settings check `THRUSTER_`-prefixed names first, then the unprefixed name.
 | `H2C_ENABLED` | false | HTTP/2 prior-knowledge listener without TLS |
 | `CAMPFIRE_TRUSTED_PROXIES` | empty | Trusted IP addresses or CIDR networks |
 | `CAMPFIRE_MESSAGE_INDEX` | true | Idempotent creation of the message room/time index |
+| `CAMPFIRE_MESSAGE_UPDATED_INDEX` | false | Optional non-unique index on `messages (room_id, updated_at)` for reconnect queries. Boot validates its shape. Disabling creation never drops an existing index. |
 | `DISABLE_SSL` | unset | Any value that is not blank disables HTTPS enforcement, also `0` and `false` (as in Rails). To enforce HTTPS, leave it unset or blank |
 
 Without TLS, enabling H2C makes the public HTTP listener HTTP/2-only; it does not support an HTTP/1 upgrade to h2c. The target listener remains HTTP/1. With TLS, port 80 remains HTTP/1 for redirects/challenges even when H2C is enabled. Cable supports HTTP/1 Upgrade and HTTP/2 extended CONNECT; accepted tunnels are never gzip-compressed.

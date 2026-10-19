@@ -7,4 +7,5 @@ public sealed record StaticRequest(
     string RawPath,
     string? AcceptEncoding = null,
     string? Range = null,
-    string? IfModifiedSince = null );
+    string? IfModifiedSince = null,
+    string? IfNoneMatch = null );

@@ -17,8 +17,8 @@ namespace Campfire.Application.Integrations.WebPush;
 /// </summary>
 public sealed class MessagePusher( CampfireDatabase database, IMessageBodyText bodyText, WebPushPool pool )
 {
-    /// <summary>Builds the message's notifications on a reader and queues them; returns the payload.</summary>
-    public async Task<PushPayload> PushAsync( long messageId, CancellationToken cancellationToken )
+    /// <summary>Builds and queues notifications on a reader. Returns no payload when no recipient is eligible.</summary>
+    public async Task<PushPayload?> PushAsync( long messageId, CancellationToken cancellationToken )
     {
         var now = RailsTimestamp.Truncate( database.Clock.GetUtcNow( ).UtcDateTime );
         var (payload, notifications) = await database.ReadAsync( db => Notifications( db, bodyText, messageId, now ), cancellationToken );
@@ -27,18 +27,22 @@ public sealed class MessagePusher( CampfireDatabase database, IMessageBodyText b
     }
 
     /// <summary>
-    /// <c>build_payload</c>, then each relevant subscription's <c>notification(**payload)</c>, everything-involved
+    /// Builds the payload only for eligible subscriptions, then each subscriber's notification, everything-involved
     /// subscribers first, each group in id order. Rails counts each subscriber's badge as it builds that notification;
     /// nothing writes in between, so one statement counts them all.
     /// </summary>
-    public static (PushPayload Payload, IReadOnlyList<WebPushNotification> Notifications) Notifications(
+    public static (PushPayload? Payload, IReadOnlyList<WebPushNotification> Notifications) Notifications(
         CampfireDb db, IMessageBodyText bodyText, long messageId, DateTime now )
     {
         var push = PushSubscriptionOperations.PushFor( db, bodyText, messageId, now );
+        if ( push.Payload is not { } payload )
+        {
+            return (null, []);
+        }
+
         var subscriptions = push.Everything.Concat( push.Mentions ).ToList( );
         List<long> subscriberIds = [.. subscriptions.Select( subscription => subscription.UserId ).Distinct( )];
         var badges = subscriberIds.Count == 0 ? [] : MembershipQueries.UnreadCounts( db, subscriberIds );
-        var payload = push.Payload;
         var notifications = subscriptions
             .Select( subscription => WebPushNotification.For(
                 subscription,

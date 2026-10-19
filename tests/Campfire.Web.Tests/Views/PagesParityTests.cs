@@ -25,7 +25,7 @@ public sealed class PagesParityTests
     }
 
     [Fact]
-    public async Task Session_transfer_matches_rails( )
+    public async Task Session_transfer_matches_the_complete_rails_form( )
     {
         const string name = "sessions_transfer";
 
@@ -33,7 +33,7 @@ public sealed class PagesParityTests
             Context( name ),
             Case( name )["path"].RequiredString( ) ) ) );
 
-        Parity.AssertDom( name, "html", html );
+        Parity.AssertSessionTransferDom( html );
     }
 
     [Fact]

@@ -90,9 +90,16 @@ public sealed partial class RoomBroadcasts
         }
     }
 
-    /// <summary><c>RoomsController#broadcast_remove_room</c>: <c>broadcast_remove_to :rooms, target: [ @room, :list ]</c>.</summary>
-    public void RoomRemoved( RoomKind kind, long roomId ) =>
+    /// <summary>Removes both shared presentations because logical deletion closes an open room before delivery.</summary>
+    public void RoomRemoved( RoomKind kind, long roomId )
+    {
         Cable.BroadcastStreamTo( [RoomsStream], Broadcasts.RoomListItemRemoved( kind, roomId ).Html );
+        if ( kind != RoomKind.Direct )
+        {
+            var other = kind == RoomKind.Open ? RoomKind.Closed : RoomKind.Open;
+            Cable.BroadcastStreamTo( [RoomsStream], Broadcasts.RoomListItemRemoved( other, roomId ).Html );
+        }
+    }
 
     /// <summary>
     /// <c>Rooms::InvolvementsController</c> hiding a room: <c>broadcast_remove_to @membership.user, :rooms, target:

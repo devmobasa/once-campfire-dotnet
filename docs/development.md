@@ -35,6 +35,8 @@ Form parsing belongs to ASP.NET Core. The small bracket-field adapter supports o
 
 Keep native AOT registration explicit. Dapper.AOT generates SQL binders/readers. Owned JSON uses source-generated metadata or explicit writers. Database connections and transactions belong to leases; release them before network/media work. Trim/AOT warnings are errors. The application uses ordinary awaits and one-line automatic property accessors.
 
+Slice base classes escape owned values with Rails-compatible helpers and pass escaped content to RazorSlices as literal output. All three inheritance roots cover the dependency's write overloads. `HtmlEncoder.Default` protects fallback paths. Arbitrary custom `IHtmlContent` can overescape through that fallback. A contract test detects new application content implementations. The web project requires no unsafe code.
+
 SQLite memory mapping is disabled (`mmap_size=0`); connections use SQLite's bounded page cache.
 
 Rendered HTML records immutable UTF-8 fragment ranges. Gzip piece keys use once-computed fragment digests and ordered predecessor identities/glue within the current fragment run's 32 KiB history. Text before the run is used only by its first fragment; that stored piece retains and compares the exact dictionary suffix, excluding glue, and charges it to the fragment store. A fixed, approximately 1 MiB doorkeeper hashes complete keys and admits pieces or whole members on their second sighting. Text and member lookups use XxHash128 with an exact plaintext check. One-off pieces use the actual response history, continuing contiguous compression or priming at most 8 KiB, and are not retained. If one-off bytes plus their priming exceed half the page, the response compresses whole and stores no payloads; its keys still enter the doorkeeper so reusable pages can warm. Admitted pieces always use exact keyed history.
@@ -43,7 +45,7 @@ Fragment, text and repeated-body gzip stores have charged limits of 32, 16 and 1
 
 ## Publishing
 
-Native AOT selects `OptimizationPreference=Speed` and keeps the default instruction-set baseline. The native linker requires clang and zlib development headers. Both variants use the pinned media libraries, ICU and the same browser assets:
+The Docker build defaults to JIT. Select `--target aot` for Native AOT. Native AOT selects `OptimizationPreference=Speed` and keeps the default instruction-set baseline. The native linker requires clang and zlib development headers. Both variants use the pinned media libraries, ICU and the same browser assets:
 
 ```sh
 dotnet restore src/Campfire.Web --locked-mode -p:PublishReadyToRun=true
@@ -54,7 +56,7 @@ dotnet publish src/Campfire.Web -c Release -r linux-x64 --no-restore --self-cont
 
 ## Browser and functional comparison
 
-Use disposable synthetic databases. The reference is a functional/frontend comparison target; Rails cookies, password hashes, signed URLs and rollback interoperability are not acceptance requirements. The native candidate prepares its own copy of the seed before startup; the reference copy is unchanged. Logical rows, membership, messages, blobs, timestamps and explicit index settings must match.
+Use disposable synthetic databases. The reference checks application behavior and the frontend. Imported bcrypt passwords and configured Rails avatar URLs work without rewriting those credentials. Other Rails cookies and signed URLs remain unsupported. The native comparison helper rewrites synthetic passwords and protected identifiers in its own seed copy. It leaves the reference copy unchanged. Match logical rows, membership, messages, blobs, timestamps and explicit index settings.
 
 These commands use `docker`. If the machine has only rootless Podman, first put the shim on `PATH` with `export PATH="$PWD/eng/docker-shim:$PATH"`. The shim sends each command to Podman.
 
@@ -63,9 +65,9 @@ export PARITY_SEED_DIR="$HOME/.cache/campfire-parity/seeds"
 export PARITY_OUT_DIR="$HOME/.cache/campfire-parity/results"
 parity/bin/reference build
 parity/bin/seed build
-PARITY_CANDIDATE_APP_IMAGE=campfire-dotnet:aot \
-  PARITY_CANDIDATE_IMAGE=campfire-candidate-dotnet-aot parity/bin/candidate build
-PARITY_CANDIDATE_IMAGE=campfire-candidate-dotnet-aot parity/bin/candidate compare \
+PARITY_CANDIDATE_APP_IMAGE=campfire-dotnet:app \
+  PARITY_CANDIDATE_IMAGE=campfire-candidate-dotnet parity/bin/candidate build
+PARITY_CANDIDATE_IMAGE=campfire-candidate-dotnet parity/bin/candidate compare \
   --seed default --out "$PARITY_OUT_DIR/dotnet-default"
 ```
 
@@ -83,7 +85,7 @@ docker run --rm --init --network none --ipc host --user "$(id -u):$(id -g)" \
 
 Run readiness lifecycle and application browser gates against the same capture inputs. Clock ticks can release deferred registration only after network and DOM settling; missing definitions remain a readiness timeout.
 
-Native comparisons use a separate explicit contract profile. Captures selected with the `.Campfire.Auth` authentication contract use that profile; retained-capture comparisons require `--native-contract`. Copy retained captures to a new output directory before recompare so original reports and diff images remain intact:
+Native comparisons use an explicit contract profile, independent of the shared `session_token` cookie name. Capture uses `--native-target`. Paired runs use `--expected-native-target` or `--actual-native-target`. The candidate wrapper selects the actual native target by default. Retained comparisons use `--native-contract`. Copy retained captures into a new output directory before recompare to preserve original reports and diff images:
 
 ```sh
 node parity/capture/cli.ts recompare --out /path/to/new-capture-copy \

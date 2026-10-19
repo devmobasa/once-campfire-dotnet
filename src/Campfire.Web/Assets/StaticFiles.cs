@@ -102,7 +102,7 @@ public sealed class StaticFiles( AssetCatalog catalog )
     /// <summary><c>Rack::Files#serving</c>, then <c>FileHandler#serve</c>'s <c>headers.update(content_headers)</c>.</summary>
     private static StaticResponse ServeFile( StaticRequest request, StaticFile file, List<KeyValuePair<string, string>> contentHeaders )
     {
-        if ( request.IfModifiedSince == file.LastModified )
+        if ( RackConditionalGet.IsFresh( request.IfNoneMatch, request.IfModifiedSince, etag: null, file.LastModified ) )
         {
             return new StaticResponse( StatusCodes.Status304NotModified, [], ReadOnlyMemory<byte>.Empty );
         }

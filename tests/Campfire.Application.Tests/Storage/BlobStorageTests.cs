@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Campfire.Application.Storage;
 using Campfire.Application.Tests.Storage.Support;
+using Campfire.Application.Tests.Support;
 using static Campfire.Application.Tests.Storage.Support.StorageVectors;
 
 namespace Campfire.Application.Tests.Storage;
@@ -38,16 +39,31 @@ public sealed class BlobStorageTests
     public async Task Losing_the_variant_race_returns_the_winner_and_deletes_the_losers_file( )
     {
         using var harness = new StorageHarness( );
-        var blob = await harness.UploadFixtureAsync( "moon.jpg", "image/jpeg" );
+        using var database = await TestDatabase.CreateAsync( fixtures: false );
+        var records = new PausedVariantRecords( new BlobRecords( database.Database ) );
+        using var storage = new BlobStorage( harness.Options, Verifier, records, TimeProvider.System );
+        using var competitor = new BlobStorage( harness.Options, Verifier, records, TimeProvider.System );
+        using var content = File.OpenRead( Fixture( "moon.jpg" ) );
+        var blob = await storage.CreateAndUploadAsync( content, new BlobFilename( "moon.jpg" ), "image/jpeg", Cancel );
         var variation = BlobStorage.VariationFor( blob, Variation.ResizeToLimit( 64, 64 ) );
-        Blob? winner = null;
-        harness.Records.BeforeRecording = async ( ) => winner = await harness.Storage.ProcessVariantAsync( blob, variation, Cancel );
+        var pending = storage.ProcessVariantAsync( blob, variation, Cancel );
+        await records.RecordingStarted.Task.WaitAsync( Cancel );
+        Blob winner;
+        try
+        {
+            winner = await competitor.ProcessVariantAsync( blob, variation, Cancel );
+        }
+        finally
+        {
+            records.ResumeRecording.TrySetResult( );
+        }
 
-        var image = await harness.Storage.ProcessVariantAsync( blob, variation, Cancel );
+        var image = await pending;
 
-        Assert.Equal( winner!.Id, image.Id );
-        Assert.Single( harness.Records.VariantRecords );
-        Assert.Equal( 2, harness.Records.Blobs.Count );
+        Assert.Equal( winner.Id, image.Id );
+        Assert.Equal( 2, records.RecordingAttempts );
+        Assert.Equal( 1, await database.CountAsync( "active_storage_variant_records" ) );
+        Assert.Equal( 2, await database.CountAsync( "active_storage_blobs" ) );
         Assert.Equal( new[] { Relative( blob ), Relative( winner ) }.Order( StringComparer.Ordinal ), harness.Files );
     }
 
@@ -64,6 +80,126 @@ public sealed class BlobStorageTests
         Assert.Single( images.Select( image => image.Id ).Distinct( ) );
         Assert.Single( harness.Records.VariantRecords );
         Assert.Equal( 2, harness.Files.Count );
+    }
+
+    [Fact]
+    public async Task Concurrent_misses_for_one_variant_perform_one_conversion( )
+    {
+        using var harness = new StorageHarness( );
+        var blob = await harness.UploadFixtureAsync( "moon.jpg", "image/jpeg" );
+        var records = new PausedVariantRecords( harness.Records );
+        using var storage = new BlobStorage( harness.Options, Verifier, records, TimeProvider.System );
+        var variation = BlobStorage.VariationFor( blob, Variation.ResizeToLimit( 32, 32 ) );
+        var first = storage.ProcessVariantAsync( blob, variation, Cancel );
+        await records.RecordingStarted.Task.WaitAsync( Cancel );
+        var second = storage.ProcessVariantAsync( blob, variation, Cancel );
+        try
+        {
+            await records.ConcurrentMiss.Task.WaitAsync( Cancel );
+        }
+        finally
+        {
+            records.ResumeRecording.TrySetResult( );
+        }
+
+        var images = await Task.WhenAll( first, second );
+
+        Assert.Equal( images[0].Id, images[1].Id );
+        Assert.Equal( 1, records.RecordingAttempts );
+        Assert.Single( harness.Records.VariantRecords );
+        Assert.Equal( 2, harness.Files.Count );
+        Assert.Empty( harness.TempFiles );
+    }
+
+    [Theory]
+    [InlineData( false )]
+    [InlineData( true )]
+    public async Task A_failed_or_cancelled_variant_producer_releases_its_key_for_retry( bool cancel )
+    {
+        using var harness = new StorageHarness( );
+        var blob = await harness.UploadFixtureAsync( "moon.jpg", "image/jpeg" );
+        var records = new PausedVariantRecords( harness.Records );
+        using var storage = new BlobStorage( harness.Options, Verifier, records, TimeProvider.System );
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource( Cancel );
+        var variation = BlobStorage.VariationFor( blob, Variation.ResizeToLimit( 32, 32 ) );
+        var first = storage.ProcessVariantAsync( blob, variation, stopping.Token );
+        await records.RecordingStarted.Task.WaitAsync( Cancel );
+        if ( cancel )
+        {
+            await stopping.CancelAsync( );
+        }
+        else
+        {
+            records.FirstFailure = new InvalidOperationException( "recording failed" );
+        }
+
+        records.ResumeRecording.TrySetResult( );
+        if ( cancel )
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>( ( ) => first );
+        }
+        else
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>( ( ) => first );
+        }
+
+        var image = await storage.ProcessVariantAsync( blob, variation, Cancel );
+
+        Assert.Equal( 2, records.RecordingAttempts );
+        Assert.True( harness.Storage.Disk.Exists( image.Key ) );
+        Assert.Equal( 2, harness.Files.Count );
+        Assert.Empty( harness.TempFiles );
+    }
+
+    private sealed class PausedVariantRecords( IBlobRecords inner ) : IBlobRecords
+    {
+        private int _recordingAttempts;
+
+        public TaskCompletionSource RecordingStarted { get; } = new( TaskCreationOptions.RunContinuationsAsynchronously );
+
+        public TaskCompletionSource ConcurrentMiss { get; } = new( TaskCreationOptions.RunContinuationsAsynchronously );
+
+        public TaskCompletionSource ResumeRecording { get; } = new( TaskCreationOptions.RunContinuationsAsynchronously );
+
+        public int RecordingAttempts => Volatile.Read( ref _recordingAttempts );
+
+        public Exception? FirstFailure { get; set; }
+
+        public Task<Blob> InsertBlobAsync( NewBlob blob, DateTimeOffset createdAt, CancellationToken cancellationToken ) =>
+            inner.InsertBlobAsync( blob, createdAt, cancellationToken );
+
+        public Task<Blob?> AttachedBlobAsync( AttachmentOwner owner, string name, CancellationToken cancellationToken ) =>
+            inner.AttachedBlobAsync( owner, name, cancellationToken );
+
+        public async Task<Blob?> VariantImageAsync( long blobId, string variationDigest, CancellationToken cancellationToken )
+        {
+            var image = await inner.VariantImageAsync( blobId, variationDigest, cancellationToken );
+            if ( image is null && RecordingStarted.Task.IsCompleted )
+            {
+                ConcurrentMiss.TrySetResult( );
+            }
+
+            return image;
+        }
+
+        public async Task<Blob?> RecordVariantAsync(
+            long blobId, string variationDigest, NewBlob image, DateTimeOffset createdAt, CancellationToken cancellationToken )
+        {
+            if ( Interlocked.Increment( ref _recordingAttempts ) == 1 )
+            {
+                RecordingStarted.TrySetResult( );
+                await ResumeRecording.Task.WaitAsync( cancellationToken );
+                if ( FirstFailure is { } failure )
+                {
+                    throw failure;
+                }
+            }
+
+            return await inner.RecordVariantAsync( blobId, variationDigest, image, createdAt, cancellationToken );
+        }
+
+        public Task<Blob?> RecordPreviewImageAsync( long blobId, NewBlob image, DateTimeOffset createdAt, CancellationToken cancellationToken ) =>
+            inner.RecordPreviewImageAsync( blobId, image, createdAt, cancellationToken );
     }
 
     [Fact]

@@ -126,14 +126,15 @@ test("cookie aliases preserve clearing and security attributes and retain unknow
     fixture.emit("http://localhost:3999/session", async () => Buffer.from("body"))
     return log.text()
   }
-  assert.equal(await record(".Campfire.Auth=a; Path=/; HttpOnly; SameSite=Lax"), await record("session_token=b; Path=/; HttpOnly; SameSite=Lax"))
+  assert.equal(await record("session_token=a; Path=/; HttpOnly; SameSite=Lax"), await record("session_token=b; Path=/; HttpOnly; SameSite=Lax"))
+  assert.notEqual(await record(".Campfire.Auth=a; Path=/; HttpOnly; SameSite=Lax"), await record("session_token=b; Path=/; HttpOnly; SameSite=Lax"))
   assert.equal(await record(".Campfire.Csrf=a; Path=/; HttpOnly; SameSite=Lax"), await record("_campfire_session=b; Path=/; HttpOnly; SameSite=Lax"))
-  assert.notEqual(await record(".Campfire.Auth=a; Path=/"), await record("session_token=b; Path=/; HttpOnly"))
-  assert.notEqual(await record(".Campfire.Auth=a; Path=/; SameSite=None"), await record("session_token=b; Path=/; SameSite=Lax"))
-  assert.notEqual(await record(".Campfire.Auth=a; Path=/private"), await record("session_token=b; Path=/"))
-  assert.notEqual(await record(".Campfire.Auth=a; Path=/; Secure"), await record("session_token=b; Path=/"))
-  assert.notEqual(await record(".Campfire.Auth=a; Path=/; Domain=localhost"), await record("session_token=b; Path=/; Domain=other.example"))
-  assert.notEqual(await record(".Campfire.Auth=; Path=/"), await record("session_token=b; Path=/"))
+  assert.notEqual(await record("session_token=a; Path=/"), await record("session_token=b; Path=/; HttpOnly"))
+  assert.notEqual(await record("session_token=a; Path=/; SameSite=None"), await record("session_token=b; Path=/; SameSite=Lax"))
+  assert.notEqual(await record("session_token=a; Path=/private"), await record("session_token=b; Path=/"))
+  assert.notEqual(await record("session_token=a; Path=/; Secure"), await record("session_token=b; Path=/"))
+  assert.notEqual(await record("session_token=a; Path=/; Domain=localhost"), await record("session_token=b; Path=/; Domain=other.example"))
+  assert.notEqual(await record("session_token=; Path=/"), await record("session_token=b; Path=/"))
   assert.notEqual(await record("unexpected=a; Path=/"), await record("session_token=b; Path=/"))
 })
 
@@ -202,7 +203,7 @@ test("canonical token URLs share one rendered block while preserving all raw pol
 
 test("WebKit redirect wire Date fills omitted raw evidence for the real auth lifetime consumer", async () => {
   const url = "http://localhost:3999/session", date = "Tue, 06 Oct 2026 12:00:00 GMT"
-  const cookie = ".Campfire.Auth=secret; Path=/; HttpOnly; SameSite=Lax; Expires=Thu, 05 Nov 2026 12:00:00 GMT"
+  const cookie = "session_token=secret; Path=/; HttpOnly; SameSite=Lax; Expires=Thu, 05 Nov 2026 12:00:00 GMT"
   const capture = async (options: { browserHeaders?: Record<string,string>; wireHeaders?: Record<string,string>; wireRequest?: Partial<WireRequest>; cookie?: string } = {}) => {
     const issued = options.cookie ?? cookie
     const browserHeaders = { "content-type": "text/html", location: "/rooms", "set-cookie": issued, ...options.browserHeaders }

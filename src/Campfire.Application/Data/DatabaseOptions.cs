@@ -15,6 +15,9 @@ public sealed class DatabaseOptions
     /// <summary>Disable only for an explicitly labelled unindexed comparison; never drops an existing index.</summary>
     public bool CreateMessageIndex { get; set; } = true;
 
+    /// <summary>Creates the optional reconnect index when enabled. Existing indexes are retained.</summary>
+    public bool CreateUpdatedMessageIndex { get; set; }
+
     public string DatabasePath => Path.Combine( StorageRoot, "db", $"{Environment}.sqlite3" );
 
     /// <summary>When the background checkpointer runs (<see cref="WalCheckpointer"/>); tests shrink these.</summary>

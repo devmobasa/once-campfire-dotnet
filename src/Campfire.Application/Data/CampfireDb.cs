@@ -27,9 +27,10 @@ public sealed class CampfireDb
 
     private bool _released;
 
-    internal CampfireDb( SqliteConnection connection )
+    internal CampfireDb( SqliteConnection connection, bool hasUpdatedMessageIndex )
     {
         _connection = connection;
+        HasUpdatedMessageIndex = hasUpdatedMessageIndex;
     }
 
     /// <summary>The leased connection, with the Rails pragmas applied (<see cref="SqliteConnections"/>).</summary>
@@ -42,6 +43,9 @@ public sealed class CampfireDb
             return _connection;
         }
     }
+
+    /// <summary>The validated reconnect index was present when this database opened.</summary>
+    internal bool HasUpdatedMessageIndex { get; }
 
     /// <summary>The open <c>BEGIN IMMEDIATE</c> transaction, or <see langword="null"/> outside one.</summary>
     public SqliteTransaction? Transaction { get; internal set; }

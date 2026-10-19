@@ -14,6 +14,7 @@ using Campfire.Web.Endpoints.UnfurlLinks;
 using Campfire.Web.Endpoints.Users;
 using Campfire.Web.Endpoints.Users.PushSubscriptions;
 using Campfire.Web.Endpoints.Welcome;
+using Campfire.Web.Hosting;
 using Campfire.Web.Http;
 using Campfire.Web.Paths;
 
@@ -62,7 +63,7 @@ public static class CampfireEndpoints
         SidebarsEndpoints.MapEndpoints( endpoints );
         WelcomeEndpoints.MapEndpoints( endpoints );
 
-        endpoints.MapMethods( EndpointPaths.Campfire.Up, HttpMethodSets.GetAndHead, ( ) => TypedResults.Text( "OK" ) )
+        endpoints.MapMethods( EndpointPaths.Campfire.Up, HttpMethodSets.GetAndHead, ( ) => TypedResults.Content( HealthCheckMiddleware.Body, ContentTypes.HtmlUtf8 ) )
             .AllowAnonymous( );
 
         endpoints.MapMethods(

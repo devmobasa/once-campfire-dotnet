@@ -110,7 +110,7 @@ public sealed class WebPushDeliveryTests
 
     [Theory]
     [InlineData( 410, "Gone", "WebPush::ExpiredSubscription", true )]
-    [InlineData( 404, "Not Found", "WebPush::InvalidSubscription", false )]
+    [InlineData( 404, "Not Found", "WebPush::InvalidSubscription", true )]
     [InlineData( 403, "Forbidden", "WebPush::Unauthorized", false )]
     [InlineData( 401, "Unauthorized", "WebPush::Unauthorized", false )]
     [InlineData( 400, "UnauthorizedRegistration", "WebPush::Unauthorized", false )]
@@ -119,7 +119,7 @@ public sealed class WebPushDeliveryTests
     [InlineData( 429, "Too Many Requests", "WebPush::TooManyRequests", false )]
     [InlineData( 503, "Service Unavailable", "WebPush::PushServiceError", false )]
     [InlineData( 302, "Found", "WebPush::ResponseError", false )]
-    public async Task Raises_what_the_gem_raises( int status, string reason, string rubyClass, bool invalidates )
+    public async Task Service_errors_keep_their_class_and_invalidate_only_gone_endpoints( int status, string reason, string rubyClass, bool invalidates )
     {
         await using var service = FakePushService.Start( status, reason );
         using var sender = service.Sender( );
@@ -130,15 +130,15 @@ public sealed class WebPushDeliveryTests
         Assert.Equal( (rubyClass, invalidates, status), (error.RubyClass, error.InvalidatesSubscription, error.Status) );
     }
 
-    /// <summary>A key that isn't a curve point (as in the fixtures) and a certificate that doesn't verify are OpenSSL errors.</summary>
+    /// <summary>Local key and TLS failures retain subscriptions.</summary>
     [Fact]
-    public async Task Openssl_errors_invalidate_the_subscription( )
+    public async Task Openssl_errors_keep_the_subscription( )
     {
         await using var service = FakePushService.Start( );
         using var sender = service.Sender( );
         var badKey = new WebPushNotification( "t", "b", "/", 0, 1, Endpoint, "dGVzdF9rZXk", "dGVzdF9hdXRo" );
 
-        Assert.True( (await Assert.ThrowsAsync<WebPushDeliveryException>( ( ) => sender.DeliverAsync( badKey, Cancellation ) )).InvalidatesSubscription );
+        Assert.False( (await Assert.ThrowsAsync<WebPushDeliveryException>( ( ) => sender.DeliverAsync( badKey, Cancellation ) )).InvalidatesSubscription );
 
         using var untrusting = new WebPushSender( service.Network with
         {
@@ -146,7 +146,7 @@ public sealed class WebPushDeliveryTests
         }, FakePushService.Vapid );
         using var receiver = new PushReceiver( );
         var tls = await Assert.ThrowsAsync<WebPushDeliveryException>( ( ) => untrusting.DeliverAsync( receiver.Notification( 1, Endpoint ), Cancellation ) );
-        Assert.Equal( ("OpenSSL::SSL::SSLError", true), (tls.RubyClass, tls.InvalidatesSubscription) );
+        Assert.Equal( ("OpenSSL::SSL::SSLError", false), (tls.RubyClass, tls.InvalidatesSubscription) );
 
         var blank = new WebPushNotification( "t", "b", "/", 0, 1, Endpoint, "", "dGVzdF9hdXRo" );
         var argument = await Assert.ThrowsAsync<WebPushDeliveryException>( ( ) => sender.DeliverAsync( blank, Cancellation ) );

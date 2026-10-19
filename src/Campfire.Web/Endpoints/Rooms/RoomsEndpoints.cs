@@ -39,9 +39,8 @@ public static partial class RoomsEndpoints
     }
 
     /// <summary>
-    /// <c>destroy</c> (<c>RoomsController</c>'s and <c>Rooms::DirectsController</c>'s): <c>@room.destroy</c> (memberships
-    /// deleted, each message destroyed with its callbacks), <c>broadcast_remove_to :rooms, target: [ @room, :list ]</c>,
-    /// then back to the root.
+    /// Removes access and records recoverable room destruction. Sidebar removal follows the committed membership change.
+    /// Redirects to the root after acknowledging the broadcast.
     /// </summary>
     public static async Task<FrontendResult> DestroyAsync( RequestContext requestContext )
     {
@@ -49,9 +48,10 @@ public static partial class RoomsEndpoints
 
         var room = RoomOrNil( requestContext ) ?? throw new InvalidOperationException( "undefined method 'destroy' for nil" );
         var app = requestContext.App( );
-        await app.Database.WriteAsync( scope => RoomOperations.Destroy( scope, room.Id ), requestContext.RequestAborted );
+        await app.Database.WriteAsync( scope => RoomDeletions.Start( scope, room.Id ), requestContext.RequestAborted );
+        await RoomDeletions.BroadcastAsync( app.Database, room.Id,
+            removed => app.Broadcasts.RoomRemoved( RoomPresentation.Kind( removed.Type ), removed.Id ), requestContext.RequestAborted );
 
-        app.Broadcasts.RoomRemoved( RoomPresentation.Kind( room.Type ), room.Id );
         return requestContext.RedirectTo( requestContext.UrlFor( Routes.Root ) );
     }
 

@@ -112,17 +112,17 @@ both captures. They do not turn a changed status, body, authorization result or 
 attribute into a match:
 
 - Opaque Data Protection tokens are replaced only after an optional fixture-owned decoder has
-  authenticated their purpose and record. Unknown and tampered tokens stay literal; a different
+  authenticated their purpose and record. Unknown and tampered tokens stay literal. A different
   purpose or record remains different. The decoder uses fixture key rings, never production keys.
 - The native target must send `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` and
   `Referrer-Policy: strict-origin-when-cross-origin`. Capture checks their exact values before
   omitting the documented security-header differences from the comparison. Missing headers fail.
 - For images and non-2xx responses, gzip versus identity and the corresponding `Accept-Encoding`
-  member of `Vary` may differ. The decoded body, content type, status and other `Vary` members stay
+  member of `Vary` differ across targets. The decoded body, content type, status and other `Vary` members stay
   compared. Unknown encodings stay visible, as do encoding differences on successful HTML.
-- Only `.Campfire.Auth` → `session_token` and `.Campfire.Csrf` → `_campfire_session` are cookie-name
-  aliases. Clearing, path, domain, HttpOnly, Secure and SameSite still differ when their contracts
-  differ. As in ordinary captures, ticking Expires/Max-Age values are omitted; these captures do
+- Both apps name the authentication cookie `session_token`. Only `.Campfire.Csrf` maps to `_campfire_session` as a cookie-name alias.
+  Clearing, path, domain, HttpOnly, Secure and SameSite still differ when their contracts
+  differ. As in ordinary captures, the comparer omits ticking Expires/Max-Age values. These captures do
   not prove cookie lifetime behavior. Flash and unknown cookie names have no alias.
 
 Retained normalized artifacts cannot prove raw headers that were already omitted or recover

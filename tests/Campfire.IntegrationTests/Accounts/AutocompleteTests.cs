@@ -33,12 +33,15 @@ public sealed class AutocompleteTests( SliceAppFactory factory ) : IClassFixture
         Assert.Null( items.Raw( "X-Total-Count" ) );
     }
 
-    [Fact]
-    public async Task The_pickers_get_json_with_the_total_count( )
+    [Theory]
+    [InlineData( false )]
+    [InlineData( true )]
+    public async Task The_pickers_get_json_with_the_total_count( bool explicitFormat )
     {
         using var client = await factory.SignedInClientAsync( "david@37signals.com" );
 
-        var json = await client.GetAsync( $"{Routes.WithFormat( Routes.AutocompletableUsers, "json" )}?query=j", "application/json" );
+        var path = explicitFormat ? Routes.WithFormat( Routes.AutocompletableUsers, "json" ) : Routes.AutocompletableUsers;
+        var json = await client.GetAsync( $"{path}?query=j", "application/json" );
         var users = JsonNode.Parse( json.Body )!.AsArray( );
 
         Assert.Equal( HttpStatusCode.OK, json.Status );
@@ -48,6 +51,18 @@ public sealed class AutocompleteTests( SliceAppFactory factory ) : IClassFixture
         Assert.All( users, user => Assert.NotEmpty( user!["sgid"]!.GetValue<string>( ) ) );
         Assert.Equal( "2", json.Raw( "X-Total-Count" ) );
         Assert.Null( json.Raw( "Link" ) );
+    }
+
+    [Fact]
+    public async Task An_unformatted_picker_request_without_a_json_accept_header_still_gets_html( )
+    {
+        using var client = await factory.SignedInClientAsync( "david@37signals.com" );
+
+        var response = await client.GetAsync( $"{Routes.AutocompletableUsers}?query=j", "*/*" );
+
+        Assert.Equal( HttpStatusCode.OK, response.Status );
+        Assert.Equal( "text/html; charset=utf-8", response.ContentType );
+        Assert.Contains( "<lexxy-prompt-item", response.Body, StringComparison.Ordinal );
     }
 
     [Fact]

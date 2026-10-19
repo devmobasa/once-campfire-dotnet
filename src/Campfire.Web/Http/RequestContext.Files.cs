@@ -66,7 +66,7 @@ public sealed partial class RequestContext
     private FrontendResult Send( SendOptions options, long total, Func<long, long, ResponseBody> slice )
     {
         var contentType = options.ContentType ?? ContentTypeFor( options.Filename );
-        var response = FrontendResult.WithBody( options.Status, contentType, ResponseBody.Empty );
+        var response = FrontendResult.WithBody( options.Status, contentType, slice( 0, total ) );
         if ( options.Disposition is { } disposition )
         {
             response.Headers.ContentDisposition = ContentDisposition( disposition, options.Filename );
@@ -75,7 +75,19 @@ public sealed partial class RequestContext
         response.Headers["Content-Transfer-Encoding"] = "binary";
         if ( !options.Ranges )
         {
-            response.Body = slice( 0, total );
+            return response;
+        }
+
+        response.Headers.ETag = ResponseHeaders.ETag;
+        response.Headers.LastModified = ResponseHeaders.LastModified;
+        if ( response.Body.IsDigestible )
+        {
+            RackETag.Apply( response );
+        }
+
+        RackConditionalGet.Apply( Request.Method, Request.Headers, response );
+        if ( response.Status == StatusCodes.Status304NotModified )
+        {
             return response;
         }
 
@@ -92,7 +104,6 @@ public sealed partial class RequestContext
                 response.Body = slice( range.Start, range.End - range.Start + 1 );
                 return response;
             default:
-                response.Body = slice( 0, total );
                 return response;
         }
     }

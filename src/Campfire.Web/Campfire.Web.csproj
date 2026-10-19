@@ -6,9 +6,9 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <!-- The app ships as a Native AOT binary (docs/development.md): `dotnet publish -r <rid>`
-         compiles it, and every build runs the trim, AOT and single-file analyzers over this project. The JIT
-         build of the same code publishes with -p:PublishAot=false. -->
+    <!-- Native AOT remains supported: `dotnet publish -r <rid>` compiles a native binary.
+         Every build runs the trim, AOT and single-file analyzers. The default JIT image
+         publishes the same source with -p:PublishAot=false. -->
     <PublishAot>true</PublishAot>
     <!-- Prefer execution speed for AOT; the JIT target publishes the same source without this setting. -->
     <OptimizationPreference Condition="'$(PublishAot)' == 'true' and '$(OptimizationPreference)' == ''">Speed</OptimizationPreference>
@@ -23,8 +23,6 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <!-- RazorSlices: the Rails HTML encoder overrides HtmlEncoder's pointer-based members. -->
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- RazorSlices names each proxy type after its file, and the views mirror the ERB file names
          (show, edit, index), which are lower-case identifiers (CS8981). -->
     <NoWarn>$(NoWarn);CS8981</NoWarn>

@@ -36,8 +36,8 @@
 # OPTIONS pass through to parity/bin/compare (--only, --engines, --viewports, --schemes,
 # --breakpoints, --out (absolute: it resolves inside parity/), --workers, ...).
 #
-# Instances are labelled with their owner, PARITY_OWNER (default: the Claude Code session,
-# CLAUDE_CODE_SESSION_ID, else the user), and `down --all` and `ps` only touch the caller's own;
+# Instances use PARITY_OWNER as their label, defaulting to the user name.
+# `down --all` and `ps` only touch instances with that label.
 # --everyone takes them all. `down --port N` stops that port's instance whoever started it.
 #
 # Docker only: the Rust app has no native runtime here.
@@ -51,7 +51,7 @@ APP_IMAGE=${PARITY_CANDIDATE_APP_IMAGE:-campfire-dotnet:app} # PARITY PATCH: was
 IMAGE=${PARITY_CANDIDATE_IMAGE:-campfire-candidate}
 ENV_FILE=$PARITY/.env.reference
 DEFAULT_PORT=3200
-OWNER=${PARITY_OWNER:-${CLAUDE_CODE_SESSION_ID:-$(id -un)}}
+OWNER=${PARITY_OWNER:-$(id -un)}
 
 die() { echo "candidate: $*" >&2; exit 1; }
 log() { echo "candidate: $*" >&2; }
@@ -229,13 +229,13 @@ compare() {
   TIME=$time FREEZE=1 up "$cand_port" "$seed"
   wait "$ref_pid" || die "reference didn't come up"
   local status=0
-  local auth_args=()
-  if [ "${PARITY_CANDIDATE_NATIVE_SECURITY:-1}" = 1 ]; then auth_args=(--actual-auth-cookie .Campfire.Auth); fi
+  local profile_args=()
+  if [ "${PARITY_CANDIDATE_NATIVE_SECURITY:-1}" = 1 ]; then profile_args=(--actual-native-target); fi
   "$PARITY/bin/compare" --seed "$seed" --time "$time" \
     --expected "http://127.0.0.1:$ref_port" --actual "http://127.0.0.1:$cand_port" \
     --expected-name reference --actual-name candidate --isolated "$isolated" \
     --reset-host "'$PARITY/bin/candidate' reset --app {target} --port {port} --seed '$seed' --time '$time'" \
-    "${auth_args[@]}" "${rest[@]+"${rest[@]}"}" &
+    "${profile_args[@]}" "${rest[@]+"${rest[@]}"}" &
   # In the background so an interrupt runs compare_teardown at once (which stops it first).
   COMPARE_PID=$!
   wait "$COMPARE_PID" || status=$?

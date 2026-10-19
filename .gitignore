@@ -31,8 +31,6 @@ test-results/
 bench/work/
 
 # Local worktrees and test output
-/AGENTS.md
-.claude/
 target/
 
 # Local guidance and generated inventories

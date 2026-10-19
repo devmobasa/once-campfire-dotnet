@@ -1,5 +1,5 @@
 #!/usr/bin/env dotnet
-// Builds the long-room seed (plan v3 section 10, "Long room"): the default seed with about 236,000 messages in its busy
+// Builds the long-room seed: the default seed with about 236,000 messages in its busy
 // room, posted through the app's HTTP endpoint the way the Rust port's room got them for its published long-room
 // numbers (once-campfire-rust 9e2a110, bench/results/room-index-20260927: the POST benchmark of header-csrf-20260927
 // left 235,767 messages in one room, and the room page and messages page were measured on that database).

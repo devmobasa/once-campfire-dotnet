@@ -29,6 +29,7 @@ export interface Target {
   proxy?: string // this target's forward proxy, set by run()
   wireHeaders?: WireReceipts
   authCookieName?: string // explicit authentication contract for this target
+  nativeTarget?: boolean // native credentials, protected tokens and security contracts
 }
 
 export interface CaptureEnv {
@@ -120,7 +121,7 @@ export async function captureCell(job: Job, target: Target, env: CaptureEnv): Pr
     // prepared sidecar for every capture/reset and never mutate the shared label cache.
     const labelsFile = path.join(env.seedDir ?? SEED_DIR, ".candidates", new URL(target.url).port, "db", "native-fixture.json")
     let labels = sharedLabels
-    if (target.authCookieName === ".Campfire.Auth") {
+    if (target.nativeTarget) {
       const nativeLabels = JSON.parse(fs.readFileSync(labelsFile, "utf8")).labels
       if (!nativeLabels || typeof nativeLabels !== "object" || Array.isArray(nativeLabels)) {
         throw new Error(`Native capture labels are missing or invalid: ${labelsFile}`)
@@ -165,7 +166,7 @@ async function capturePage(
   const pages: Record<string, Page> = {}
   const trackers: Record<string, PageTracker> = {}
   const networks: Record<string, NetworkLog> = {}
-  const normalizeOptions: NormalizeOptions = { seedTime: Date.parse(env.time), nativeComparison: env.nativeComparison, nativeTarget: target.authCookieName === ".Campfire.Auth", protectedTokens: new Map() }
+  const normalizeOptions: NormalizeOptions = { seedTime: Date.parse(env.time), nativeComparison: env.nativeComparison, nativeTarget: target.nativeTarget, protectedTokens: new Map() }
   if (normalizeOptions.nativeTarget && env.nativeTokenResolver) normalizeOptions.resolveProtectedTokens = protectedTokenResolver(env.nativeTokenResolver, target.url, normalizeOptions.protectedTokens!)
   let serverResponse: Response | null = null
 
@@ -375,7 +376,7 @@ async function captureFragment(state: State, target: Target, env: CaptureEnv, ba
     timeout: env.timeoutMs,
   })
   const body = await response.body()
-  const normalizeOptions: NormalizeOptions = { seedTime: Date.parse(env.time), nativeComparison: env.nativeComparison, nativeTarget: target.authCookieName === ".Campfire.Auth", protectedTokens: new Map() }
+  const normalizeOptions: NormalizeOptions = { seedTime: Date.parse(env.time), nativeComparison: env.nativeComparison, nativeTarget: target.nativeTarget, protectedTokens: new Map() }
   if (normalizeOptions.nativeTarget && env.nativeTokenResolver) {
     normalizeOptions.resolveProtectedTokens = protectedTokenResolver(env.nativeTokenResolver, target.url, normalizeOptions.protectedTokens!)
     await normalizeOptions.resolveProtectedTokens(body.toString("utf8") + "\n" + url)

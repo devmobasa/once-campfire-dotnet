@@ -9,8 +9,7 @@ namespace Campfire.IntegrationTests.Slice;
 
 /// <summary>
 /// <c>Messages::BoostsController</c> (<c>test/controllers/messages/boosts_controller_test.rb</c>) and the operation's boost
-/// sequence: the boost row and the deferred touch in the transaction, the search index after commit, then the room's
-/// broadcast.
+/// sequence: the boost row and deferred touch in the transaction, then the room's broadcast. Unchanged text is not reindexed.
 /// </summary>
 public sealed class BoostTests( SharedSliceApp shared ) : IClassFixture<SharedSliceApp>
 {
@@ -76,7 +75,7 @@ public sealed class BoostTests( SharedSliceApp shared ) : IClassFixture<SharedSl
     }
 
     [Fact]
-    public async Task Boosting_touches_and_reindexes_the_message_then_appends_the_boost_then_redirects( )
+    public async Task Boosting_touches_without_reindexing_then_appends_the_boost_then_redirects( )
     {
         using var factory = new SliceAppFactory( );
         var (client, token) = await factory.SignedInWithPageTokenAsync( "david@37signals.com", Routes.Room( Designers ) );
@@ -100,8 +99,8 @@ public sealed class BoostTests( SharedSliceApp shared ) : IClassFixture<SharedSl
         Assert.Equal( HttpStatusCode.Found, reply.Status );
         Assert.Equal( $"{factory.BaseAddress}messages/{First}/boosts", reply.Location );
         Assert.NotEqual( before, factory.Scalar<string>( $"SELECT updated_at FROM messages WHERE id = {First}" ) );
-        Assert.Equal( "First post!", factory.Scalar<string>( $"SELECT body FROM message_search_index WHERE rowid = {First}" ) );
-        Assert.Equal( ["plain_text", "broadcast"], factory.Events.Only( "plain_text", "broadcast" ) );
+        Assert.Equal( "stale", factory.Scalar<string>( $"SELECT body FROM message_search_index WHERE rowid = {First}" ) );
+        Assert.Equal( ["broadcast"], factory.Events.Only( "plain_text", "broadcast" ) );
         var payload = JsonNode.Parse( Assert.Single( payloads ) )!.GetValue<string>( );
         Assert.StartsWith(
             "<turbo-stream maintain_scroll=\"true\" action=\"append\" target=\"boosts_message_0001\"><template>",

@@ -1,6 +1,6 @@
 # Frontend and security contracts
 
-This is a fresh ASP.NET Core performance rewrite of Campfire. It reuses the pinned browser frontend and selected application behavior. It does not accept existing Rails installation credentials, cookies or protected URLs, and it does not promise database rollback interoperability.
+This ASP.NET Core performance rewrite reuses the pinned Campfire frontend and selected Rails behavior. It verifies Rails bcrypt password digests. It accepts Rails avatar URLs when `SECRET_KEY_BASE` matches the original installation. Native protection owns browser sessions and all other signed URLs. Existing Rails cookies and other signed URLs do not work. The port does not guarantee database rollback interoperability.
 
 | Boundary | Current behavior |
 |---|---|
@@ -10,15 +10,15 @@ This is a fresh ASP.NET Core performance rewrite of Campfire. It reuses the pinn
 | Forms | Native parsing and spooling; bounded bracket adapter for owned frontend fields; duplicate/conflicting fields return 400 |
 | JSON | Explicit DTOs with source-generated metadata; malformed JSON returns 400 |
 | Body limits | 16 MiB non-form, 32 MiB multipart; oversized requests return 413 |
-| Browser authentication | A native protected cookie identifies the session ID and a random row token. Ordinary requests read the current user and session with one SQLite join. A page-cache hit can use this authority again until the database changes. The hit still checks the credentials, status, expiry and activity rules. |
+| Browser authentication | The `session_token` cookie carries a native protected session ID and random row token. Ordinary requests read the current user and session with one SQLite join. Page-cache hits reuse authority until the database changes. Every hit checks credentials, status, expiry and activity rules. Rails-format cookies act as signed-out requests. |
 | Sign-in challenge | A protected room redirects to `/session/new?returnUrl=...`; the sign-in form preserves that destination. This challenge's 302 omits Rails' `Cache-Control: no-cache` and HTML Content-Type headers |
 | Cookie lifetime | Absolute 30 days, non-sliding; no per-response authentication-cookie rewrite |
 | Cable admission | Validate the protected browser ticket and current SQLite authority before and after revocation subscription. The socket bypasses browser authentication/authorization, form/CSRF and session-activity middleware, preserving origin checks, proxy trust and CONNECT IP bans. No browser ticket, principal or request DI scope is kept for the socket lifetime; subscription parameters own plain values |
-| Passwords | Identity V3 hashes; no legacy hash fallback |
+| Passwords | New and changed passwords use Identity V3. Sign-in verifies Rails bcrypt digests without rewriting them. Missing-user checks use a cached synthetic digest. |
 | Browser forgery protection | Unsafe requests require `Sec-Fetch-Site: same-origin`; supplied Origin must match the trusted effective scheme, host and port. Reject same-site, cross-site, none and Origin null with 422. Missing metadata is allowed only on HTTP without forced SSL. Bot-key routes and Cable retain their independent credential checks |
 | Frontend token tags | Meta and uncached hidden form fields remain with empty values; cached fragments and broadcasts omit hidden fields. No antiforgery cookie or token service |
 | Fragment cache | UTF-8 markup with record-version dependencies, scoped by committed database generation and rendered origin |
-| Protected identifiers | Purpose-bound Data Protection; invalid/expired identifiers cannot grant access |
+| Protected identifiers | Native URLs use purpose-bound Data Protection. Avatars also accept Rails 8.2 User avatar signed IDs when `SECRET_KEY_BASE` matches. Invalid and expired identifiers cannot grant access. Other Rails signed URLs do not work. |
 | Browser bot isolation | Bot routes require their independent bot key; a browser cookie is insufficient |
 | Proxy trust | Explicit opt-in IP/CIDR list; unlisted peers cannot supply client IP, host or scheme |
 | Errors | Styled static HTML 404/500 pages with a home link, or ProblemDetails for JSON; no error-path rerouting or private exception data |
@@ -27,7 +27,42 @@ This is a fresh ASP.NET Core performance rewrite of Campfire. It reuses the pinn
 | Browser support | No legacy AllowBrowser gate; test the frontend on the selected browsers |
 | Framework pages | Turbo Native historical-navigation pages remain; unused mailbox/conductor and room-settings routes are unregistered and return safe 404s |
 | Message index | Optional idempotent `(room_id, created_at)` index; matched index state is required for performance comparisons |
-| Text creation failures | Message, body, touches, search indexing and unread updates commit atomically. FTS or unread SQL failure rolls them all back and emits no push, broadcast or webhook. This deliberately differs from Rails' committed message on an indexing failure. Attachment and direct-upload callback behavior is unchanged |
+| Message creation failures | Message, body, attachment metadata, touches, search indexing and unread updates commit atomically, as in current Rails. FTS or unread SQL errors roll back the transaction and emit no push, broadcast or webhook. Disk uploads run after commit. Upload failures retain the committed rows and stop later callback effects. |
+
+## Deletion recovery
+
+The port adds three SQLite tables for resumable cleanup:
+
+- `campfire_room_deletions` records room deletion progress.
+- `campfire_room_deletion_members` retains the former members who need connection resets and room-list updates.
+- `campfire_cleanup` retains pending search-index, blob and file cleanup work.
+
+Rails ignores these tables.
+Include them in database backups and restore them with the application tables.
+Restore the database and blob files from the same consistent backup.
+Keep pending cleanup records until the application finishes their work.
+
+Room deletion first closes an open room and removes its memberships in one transaction.
+Bounded background work then removes its messages and room.
+An interruption resumes the recorded phase after restart.
+Connection resets and room-list updates can repeat during recovery.
+The cleanup preserves search-index removal before dependent blob purges.
+File cleanup retries missing files safely and retains failed work for another attempt.
+Deletion blocks room updates and membership grants inside their write transactions.
+Current Rails has no durable deletion guard, but both implementations remove dependent memberships when the room is destroyed.
+Cleanup failures back off independently, so one failed item cannot prevent other room deletions.
+Cleanup records retain their original creation time for pending-age reporting.
+Debug cleanup logs report pending counts, oldest pending age and oldest due age for both durable queues.
+Error logs identify each failed cleanup record or room.
+Earlier development databases with a different cleanup-table shape fail at startup and require recreation.
+
+## Password verification work
+
+The first missing-user attempt observes the database's highest valid bcrypt work factor, capped at 12, and creates a synthetic digest. Later attempts reuse it without scanning users. Databases without bcrypt use Identity V3 dummy work.
+
+Known users retain their stored algorithm and cost. Mixed algorithms and different costs still produce timing differences. Reopen the application database after changing its credential formats to refresh the dummy-work policy.
+
+Rejected bcrypt input still performs verification work before it fails. Byte-72 truncation and NUL rejection match Rails.
 
 ## Deliberate differences and bounds
 
@@ -43,16 +78,20 @@ These decisions describe the current implementation and the expectations used by
 | Page arithmetic | Saturate page numbers, offsets and next-page arithmetic at `long.MaxValue` instead of wrapping. Excessively large pages return no rows. |
 | Cable resource bounds | Defaults: 64 subscriptions per connection, 4 KiB identifiers, 1 MiB incoming messages, and at most 256 queued frames or 4 MiB beyond the current write. Excess subscriptions are ignored; oversize messages close with 1009. Slow consumers disconnect with reconnect requested. Writes time out at 30 seconds; close waits at most five seconds. Commands remain ordered and subscription cleanup runs on disconnect. |
 | Cable authority | Recheck session/user authority after subscribing to revocation notifications, closing the admission race for bans, sign-out and deactivation. Compression uses no context takeover and is bounded by the same queue and deadline rules. |
-| Public origin and trusted proxies | Shared markup uses the configured public origin (`TLS_DOMAIN`), never a forged request Host. Without it, request-derived URLs retain the documented HTTP behavior. Forwarded client IP, scheme and host are honored only for explicitly trusted peers. |
+| Public origin and trusted proxies | Shared markup uses `CAMPFIRE_PUBLIC_ORIGIN`, with the first `TLS_DOMAIN` as its HTTPS fallback. An explicit origin supports HTTP and custom ports. Forged request Hosts cannot replace either configured origin. Without configuration, request-derived URLs retain the documented HTTP behavior. Forwarded client IP, scheme and host are honored only for explicitly trusted peers. |
 | Opengraph unfurling | Recheck and pin permitted public destinations at each redirect. Cap an unfurl at 10 seconds total, five seconds per connect/read, 16 concurrent unfurls and four concurrent parses. Fetch at most 10 responses and 5 MB per page; retain at most 256 attributes per meta tag. Deadline exhaustion returns 204. |
 | Webhooks | Administrator-configured destinations can address internal services and use the environment proxy. Keep the seven-second connect/read timeout, with a 60-second whole-delivery deadline and a 100 MiB decompressed reply cap. Timeout produces the usual text reply; an oversized reply fails delivery. |
 | Web Push | Restrict destinations to permitted public HTTPS push services. Limit connect/read to 10 seconds and the entire delivery to 30 seconds. Deadline exhaustion keeps the subscription through the existing timeout handling. |
 | VAPID boot checks | The app does not validate VAPID keys at boot, as in Rails. If a key is missing, the app generates a new fallback key, and push services reject its signatures. An invalid P-256 key fails at delivery. For push notifications, set a stable `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`: a matching P-256 key pair, encoded as base64url. The port keeps this limitation from Rails. |
-| Search NOT behavior | Sanitized words are passed to SQLite FTS5. A malformed operator expression such as standalone `NOT` still returns 500 before any search-history write, matching the pinned Rails behavior. It is not rewritten into an empty search. |
+| Push failure handling | The app deletes subscriptions only after push-service 404 or 410 responses. It retains subscriptions and logs local key, configuration and TLS errors. Rails also deletes subscriptions on OpenSSL errors. A server misconfiguration must not erase users' subscriptions. |
+| Conditional requests | Cache hits, misses, static files and downloads share RFC 9110 conditional checks. ETag lists, wildcards and weak comparisons work consistently. If-None-Match takes precedence over If-Modified-Since. Validators run before range selection. A matching condition returns 304 even when the request includes Range. Rack uses exact matching instead. |
+| Front-cache freshness | The cache measures response age from real header-start time and any valid upstream Age. Slow fills consume freshness. Hits emit Age without renewing freshness. Date replacement remains independent of the business clock. |
+| Unread notifications | Shared rooms preserve their first unread timestamp. Direct rooms touch each eligible recipient. One worker sends timestamped notices after commit, reading at most 128 eligible memberships per page. It checks cancellation between pages and deliveries. Read timestamps prevent delayed notices from restoring stale unread state. |
+| Search NOT behavior | Search quotes each word as a literal FTS5 term, including `NOT` and `AND`. Reachable search selects the newest 100 matches by ID and renders them in ascending ID order, matching current Rails. |
 | Jobs and cache storage | Job queues, outbound worker concurrency and cache budgets are bounded and process-local. Full-queue behavior is defined per job kind; queued best-effort work is lost on process exit. Fragments use an in-process 32 MiB store rather than Redis. The page cache defaults to 64 MiB; its viewer isolation, generation invalidation and expiry checks also apply with caching disabled. |
-| Rendering validators and text writes | Page validators describe rendered content rather than record timestamps alone. Text-message creation rolls back on FTS or unread SQL failure and emits no external effects, whereas attachment callbacks retain their earlier commit ordering. The optional `(room_id, created_at)` index is an additional schema index, created idempotently. |
+| Rendering validators and message writes | Page validators describe rendered content rather than record timestamps alone. Message creation rolls back on FTS or unread SQL failure and emits no external effects. The optional `(room_id, created_at)` index is an additional schema index, created idempotently. |
 
-Keep sanitization, attribute escaping, DOM-clobbering protection, attachment-depth limits, origin checks, resource permissions and current member names. External message effects run after commit; attachment paths retain their existing callback ordering. In-process jobs are bounded best-effort work; limits/caches are process-local.
+Keep sanitization, attribute escaping, DOM-clobbering protection, attachment-depth limits, origin checks, resource permissions and current member names. External message effects run after commit. In-process jobs are bounded best-effort work. Limits and caches are process-local.
 
 Empty frontend tags leave layout bytes stable. Recorded page parts contribute their ordered content digests to a weak SHA-256 validator; bodies without recorded fragments retain a whole-body digest. These values differ from Rails' whole-body ETags. Messages also validate rendered content, not record timestamps: an unchanged timestamp cannot validate edited content, and If-Modified-Since alone returns 200. Gzip, identity and HEAD share the content validator. HEAD/304/aborted responses retain pooled-buffer ownership and disposal. Protocol-specific Cable commands and JSON shapes remain part of the frontend contract; authentication formats do not.
 

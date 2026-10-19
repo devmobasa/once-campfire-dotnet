@@ -3,9 +3,7 @@ using Microsoft.Net.Http.Headers;
 namespace Campfire.Web.Http;
 
 /// <summary>
-/// <c>Rack::ConditionalGet</c> (rack 3.2.6): a GET or HEAD answered 200 becomes an empty 304 when
-/// <c>If-None-Match</c> equals the <c>ETag</c> exactly, or (without <c>If-None-Match</c>)
-/// <c>If-Modified-Since</c> is at or after <c>Last-Modified</c>.
+/// Converts successful GET and HEAD responses to empty 304 responses using shared HTTP validators.
 /// </summary>
 public static class RackConditionalGet
 {
@@ -14,7 +12,8 @@ public static class RackConditionalGet
         ArgumentNullException.ThrowIfNull( requestHeaders );
         ArgumentNullException.ThrowIfNull( response );
 
-        if ( !HttpMethodChecks.IsGetOrHead( method ) || response.Status != StatusCodes.Status200OK || !IsFresh( requestHeaders, response ) )
+        if ( !HttpMethodChecks.IsGetOrHead( method ) || response.Status != StatusCodes.Status200OK
+            || !IsFresh( requestHeaders, response.Header( HeaderNames.ETag ), response.Header( HeaderNames.LastModified ) ) )
         {
             return;
         }
@@ -25,21 +24,26 @@ public static class RackConditionalGet
         response.Body = ResponseBody.Empty;
     }
 
-    private static bool IsFresh( IHeaderDictionary requestHeaders, FrontendResult response )
+    internal static bool IsFresh( IHeaderDictionary requestHeaders, string? etag, string? lastModified ) =>
+        IsFresh( requestHeaders.TryGetValue( HeaderNames.IfNoneMatch, out var noneMatch ) ? noneMatch.ToString( ) : null,
+            requestHeaders.IfModifiedSince.ToString( ), etag, lastModified );
+
+    internal static bool IsFresh( string? ifNoneMatch, string? ifModifiedSince, string? etag, string? lastModified )
     {
-        if ( requestHeaders.TryGetValue( HeaderNames.IfNoneMatch, out var noneMatch ) )
+        if ( ifNoneMatch is not null )
         {
-            return response.Header( HeaderNames.ETag ) == noneMatch.ToString( );
+            if ( ifNoneMatch.Trim( ) == "*" )
+            {
+                return true;
+            }
+
+            return EntityTagHeaderValue.TryParseStrictList( [ifNoneMatch], out var validators )
+                && !validators.Any( validator => validator.Equals( EntityTagHeaderValue.Any ) )
+                && EntityTagHeaderValue.TryParse( etag, out var current )
+                && validators.Any( validator => validator.Compare( current, useStrongComparison: false ) );
         }
 
-        if ( requestHeaders.TryGetValue( HeaderNames.IfModifiedSince, out var since ) && ToRfc2822( since.ToString( ) ) is { } modifiedSince )
-        {
-            return ToRfc2822( response.Header( HeaderNames.LastModified ) ) is { } lastModified && modifiedSince >= lastModified;
-        }
-
-        return false;
+        return HeaderUtilities.TryParseDate( ifModifiedSince, out var since )
+            && HeaderUtilities.TryParseDate( lastModified, out var modified ) && since >= modified;
     }
-
-    /// <summary>The shortest valid date is 16 characters; anything shorter is ignored without parsing.</summary>
-    private static DateTimeOffset? ToRfc2822( string? value ) => value is { Length: >= 16 } ? HttpDate.Parse( value ) : null;
 }

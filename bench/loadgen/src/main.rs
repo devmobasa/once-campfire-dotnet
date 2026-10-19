@@ -16,7 +16,7 @@
 //! for allocation counting) and `--trace FILE` (each request's start, latency and status). `cable` prints `PHASE <name> <unix ms>` lines on stderr so memory
 //! samples can be attributed to its phases.
 //!
-//! PATCH (the .NET port's bench, plan section 10 "Correctness during benchmarks"): responses are validated and
+//! Responses are validated during benchmarks and
 //! mismatches counted, never silently dropped.
 //!   http    --expect-status 200[,304] --expect-type text/html --expect-body 'needle|needle' --expect-echo 1
 //!           --validate-every N: every response's status, Content-Type and Content-Encoding are checked; the body

@@ -85,10 +85,11 @@ public static class BlobOperations
         var destroyed = await database.WriteAsync( scope => Destroy( scope, blobId ), cancellationToken );
         if ( destroyed is null )
         {
-            return false;
+            return await CleanupOutbox.RetryFileAsync( database, storage, blobId, cancellationToken );
         }
 
         storage.DeleteFiles( destroyed );
+        await database.WriteAsync( scope => CleanupOutbox.FileRemoved( scope.Db, destroyed.Key, destroyed.ServiceName ), cancellationToken );
         return true;
     }
 
@@ -107,26 +108,12 @@ public static class BlobOperations
             return null;
         }
 
-        scope.Enlist( RecordKeys.Blob( blobId ) );
-        var variantRecordIds = db.Connection.Query<long>(
-                "SELECT active_storage_variant_records.id FROM active_storage_variant_records " +
-                "WHERE active_storage_variant_records.blob_id = @blobId ORDER BY active_storage_variant_records.id",
-                new
-                {
-                    blobId
-                },
-                db.Transaction )
-            .AsList( );
-        foreach ( var recordId in variantRecordIds )
-        {
-            AttachedOne.Remove( scope, AttachmentOwner.ForVariantRecord( recordId ), BlobRecords.VariantImageName );
-            db.Connection.Execute( "DELETE FROM active_storage_variant_records WHERE id = @recordId", new
-            {
-                recordId
-            }, db.Transaction );
-        }
-
-        AttachedOne.Remove( scope, AttachmentOwner.ForBlob( blobId ), BlobRecords.PreviewImageName );
+        const string children = "(record_type='ActiveStorage::VariantRecord' AND name='image' AND record_id IN (SELECT id FROM active_storage_variant_records WHERE blob_id=@blobId)) OR (record_type='ActiveStorage::Blob' AND record_id=@blobId AND name='preview_image')";
+        db.Connection.Execute( $"INSERT INTO campfire_cleanup (kind,record_id,created_at,next_attempt_at) SELECT 1,blob_id,@now,@now FROM active_storage_attachments WHERE {children}",
+            new { blobId, now = scope.Now }, db.Transaction );
+        db.Connection.Execute( $"DELETE FROM active_storage_attachments WHERE {children}", new { blobId }, db.Transaction );
+        db.Connection.Execute( "DELETE FROM active_storage_variant_records WHERE blob_id=@blobId", new { blobId }, db.Transaction );
+        CleanupOutbox.QueueFile( scope, blob );
         db.Connection.Execute( "DELETE FROM active_storage_blobs WHERE id = @blobId", new
         {
             blobId

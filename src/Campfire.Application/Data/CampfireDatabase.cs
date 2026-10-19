@@ -61,6 +61,8 @@ public sealed class CampfireDatabase : IDisposable
         }
     }
 
+    private bool HasUpdatedMessageIndex { get; init; }
+
     /// <summary>The database file.</summary>
     public string Path { get; }
 
@@ -95,7 +97,10 @@ public sealed class CampfireDatabase : IDisposable
         try
         {
             WalConnections.DisableAutoCheckpoint( writer );
-            var preparation = SchemaSetup.Prepare( writer, options.Environment, clock, options.CreateMessageIndex, logger );
+            var preparation = SchemaSetup.Prepare( writer, options.Environment, clock, options.CreateMessageIndex, logger, options.CreateUpdatedMessageIndex );
+            using var indexCommand = writer.CreateCommand( "SELECT 1 FROM sqlite_master WHERE type='index' AND name=@name AND tbl_name='messages'" );
+            indexCommand.Parameters.AddWithValue( "@name", SchemaSetup.UpdatedMessagesIndex );
+            var hasUpdatedMessageIndex = indexCommand.ExecuteScalar( ) is not null;
             for ( var index = 0; index < options.ReaderCount; index++ )
             {
                 readers.Add( SqliteConnections.Open( path, reader: true ) );
@@ -103,7 +108,7 @@ public sealed class CampfireDatabase : IDisposable
 
             WalConnections.TakeAppendedPages( writer );
             checkpointer = new WalCheckpointer( path, writerGate, options.Checkpoints, logger ?? NullLogger.Instance );
-            return new CampfireDatabase( path, writer, readers, writerGate, checkpointer, clock, hooks ) { Preparation = preparation };
+            return new CampfireDatabase( path, writer, readers, writerGate, checkpointer, clock, hooks ) { Preparation = preparation, HasUpdatedMessageIndex = hasUpdatedMessageIndex };
         }
         catch
         {
@@ -127,7 +132,7 @@ public sealed class CampfireDatabase : IDisposable
             await _writerGate.WaitAsync( cancellationToken );
             if ( _checkpointer.WalLimitWait is not { } truncation )
             {
-                return new WriterLease( this, _writer, new CampfireDb( _writer ) );
+                return new WriterLease( this, _writer, new CampfireDb( _writer, HasUpdatedMessageIndex ) );
             }
 
             // Hand the lease to the checkpointer for its TRUNCATE, then queue again.
@@ -147,7 +152,7 @@ public sealed class CampfireDatabase : IDisposable
             throw new InvalidOperationException( "The reader pool and its semaphore disagree" );
         }
 
-        return new ReaderLease( this, reader, new CampfireDb( reader ) );
+        return new ReaderLease( this, reader, new CampfireDb( reader, HasUpdatedMessageIndex ) );
     }
 
     /// <summary>Runs <paramref name="work"/> as one write transaction, with its after-commit work, under the writer lease.</summary>

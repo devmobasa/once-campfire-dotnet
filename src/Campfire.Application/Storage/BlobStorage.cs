@@ -23,6 +23,7 @@ public sealed partial class BlobStorage : IDisposable
     private readonly TimeProvider _time;
     private readonly BlobAnalyzer _analyzer;
     private readonly SemaphoreSlim _conversions;
+    private readonly VariantFlights _variantFlights = new( );
 
     public BlobStorage( StorageOptions options, ActiveStorageVerifier verifier, IBlobRecords records, TimeProvider time )
     {
@@ -48,7 +49,11 @@ public sealed partial class BlobStorage : IDisposable
 
     public MediaTools Tools { get; }
 
-    public void Dispose( ) => _conversions.Dispose( );
+    public void Dispose( )
+    {
+        _variantFlights.Dispose( );
+        _conversions.Dispose( );
+    }
 
     // --- Uploads -----------------------------------------------------------------------------------
 
@@ -129,10 +134,16 @@ public sealed partial class BlobStorage : IDisposable
     {
         ArgumentNullException.ThrowIfNull( blob );
 
-        Disk.Delete( blob.Key );
-        if ( blob.IsImage )
+        DeleteFiles( blob.Key, blob.IsImage );
+    }
+
+    /// <summary>Deletes files from a durable key after its blob row has disappeared.</summary>
+    public void DeleteFiles( string key, bool deleteLegacyVariants )
+    {
+        Disk.Delete( key );
+        if ( deleteLegacyVariants )
         {
-            Disk.DeleteLegacyVariants( blob.Key );
+            Disk.DeleteLegacyVariants( key );
         }
     }
 

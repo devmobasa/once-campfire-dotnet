@@ -50,6 +50,7 @@ public static class CampfireWebSetup
         services.AddSingleton( new CampfireVersion( options.AppVersion, options.GitRevision ) );
         services.AddSingleton( CreateHttpOptions( options, builder.Environment.ContentRootPath ) );
         services.AddSingleton<RequestContextServices>( );
+        services.AddSingleton( new RailsAvatarTokens( builder.Configuration[RailsAvatarTokens.SecretVariable] ) );
         services.AddBrowserAuthentication( StoragePaths.From( options, builder.Environment.ContentRootPath ).Root );
         services.AddSingleton<ITokenProtector, ProtectedTokens>( );
         services.AddSignInRateLimit( );
@@ -74,6 +75,7 @@ public static class CampfireWebSetup
         app.UseMiddleware<CableTransportMiddleware>( );
         app.UseMiddleware<ProxyTrustBoundary>( );
         app.UseForwardedHeaders( );
+        app.UseMiddleware<HealthCheckMiddleware>( );
         app.UseMiddleware<FrontServerMiddleware>( );
         app.UseMiddleware<DefaultResponseHeadersMiddleware>( );
         app.UseExceptionHandler( new ExceptionHandlerOptions

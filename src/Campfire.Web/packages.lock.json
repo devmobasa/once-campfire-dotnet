@@ -73,6 +73,7 @@
         "type": "Project",
         "dependencies": {
           "AngleSharp": "[1.8.2, )",
+          "BCrypt.Net-Next": "[4.2.1, )",
           "Dapper": "[2.1.89, )",
           "Dapper.AOT": "[1.1.0, )",
           "Microsoft.Data.Sqlite": "[11.0.0-rc.2.26504.105, )",
@@ -84,6 +85,12 @@
         "requested": "[1.8.2, )",
         "resolved": "1.8.2",
         "contentHash": "iRlkfBIhi+gTgTxBlYNT4PlmaiVEy7+qX3BmprAK4cYE1UjfSNFI4mEDyxC1qgtAKYg5rjGYgL3tJlzGF+Ukdg=="
+      },
+      "BCrypt.Net-Next": {
+        "type": "CentralTransitive",
+        "requested": "[4.2.1, )",
+        "resolved": "4.2.1",
+        "contentHash": "cJ1Zaad8sBSQJq3QBSPmFuLq0XDi9ys0Dk5S11gakZ2qdFWC1aaRLZ7sqOLQjGJYhgIK3LW3TixJswM6+CVbyw=="
       },
       "Dapper": {
         "type": "CentralTransitive",

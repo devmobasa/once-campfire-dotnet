@@ -132,7 +132,7 @@ internal sealed class CacheRunner( Dictionary<string, string> options )
                 throw new InvalidOperationException( $"Viewer {index} login failed: HTTP {( int ) response.StatusCode}" );
             }
 
-            var cookie = cookies.Single( field => field.StartsWith( ".Campfire.Auth=", StringComparison.Ordinal ) ).Split( ';' )[0];
+            var cookie = cookies.Single( field => field.StartsWith( "session_token=", StringComparison.Ordinal ) ).Split( ';' )[0];
             users[index] = users[index] with { Cookie = cookie };
         }
 

@@ -1,9 +1,11 @@
+using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Text.Json.Nodes;
 using Campfire.Application.Integrations.WebPush;
 using Campfire.Application.Memberships;
 using Campfire.Application.Messages;
 using Campfire.Application.Tests.Support;
+using Microsoft.Extensions.Logging;
 
 namespace Campfire.Application.Tests.Integrations.WebPush;
 
@@ -104,14 +106,15 @@ public sealed class WebPushPoolTests
     }
 
     [Fact]
-    public async Task Hands_expired_and_openssl_failures_to_the_handler_and_logs_the_rest( )
+    public async Task Deletes_only_gone_service_subscriptions_and_logs_local_failures( )
     {
         var invalidated = new List<long>( );
+        var log = new DeliveryLog( );
         var pool = new WebPushPool( ( notification, _ ) => notification.SubscriptionId switch
         {
             1 => throw new WebPushDeliveryException( "WebPush::ExpiredSubscription", "gone", invalidatesSubscription: true, status: 410 ),
             2 => throw new WebPushDeliveryException( "OpenSSL::PKey::EC::Point::Error", "bad key", invalidatesSubscription: true ),
-            3 => throw new WebPushDeliveryException( "WebPush::InvalidSubscription", "not found", status: 404 ),
+            3 => throw new WebPushDeliveryException( "WebPush::InvalidSubscription", "not found", invalidatesSubscription: true, status: 404 ),
             4 => throw new InvalidOperationException( "boom" ),
             _ => Task.FromResult<int?>( 201 ),
         }, ( id, _ ) =>
@@ -122,12 +125,26 @@ public sealed class WebPushPoolTests
             }
 
             return Task.CompletedTask;
-        }, null );
+        }, log );
 
         pool.Queue( Enumerable.Range( 1, 5 ).Select( id => new WebPushNotification( "t", "b", "/", 0, id, null, null, null ) ) );
         await pool.ShutdownAsync( TimeSpan.FromSeconds( 30 ) );
 
-        Assert.Equal( [1, 2], invalidated.Order( ) );
+        Assert.Equal( [1, 3], invalidated.Order( ) );
+        Assert.Contains( log.Messages, message => message.Contains( "OpenSSL::PKey::EC::Point::Error", StringComparison.Ordinal ) );
+        Assert.Contains( log.Messages, message => message.Contains( "InvalidOperationException", StringComparison.Ordinal ) );
+    }
+
+    private sealed class DeliveryLog : ILogger
+    {
+        public ConcurrentQueue<string> Messages { get; } = new( );
+
+        public IDisposable? BeginScope<TState>( TState state ) where TState : notnull => null;
+
+        public bool IsEnabled( LogLevel logLevel ) => true;
+
+        public void Log<TState>( LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter ) =>
+            Messages.Enqueue( formatter( state, exception ) );
     }
 
     [Fact]
@@ -166,6 +183,7 @@ public sealed class WebPushPoolTests
         var payload = await pusher.PushAsync( (await PostAsync( testDatabase, "This is from earth" )).Id, Cancellation );
         await pool.ShutdownAsync( TimeSpan.FromSeconds( 30 ) );
 
+        Assert.NotNull( payload );
         Assert.Equal( ("Designers", "David: This is from earth"), (payload.Title, payload.Body) );
         Assert.Equal( 2, service.Server.Received.Count );
         foreach ( var request in service.Server.Received )

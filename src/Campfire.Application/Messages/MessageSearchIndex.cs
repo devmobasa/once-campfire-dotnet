@@ -3,18 +3,16 @@ using Campfire.Application.Data.Hooks;
 
 using Dapper;
 
-using Microsoft.Data.Sqlite;
-
 namespace Campfire.Application.Messages;
 
 /// <summary>
 /// <c>Message::Searchable</c>: the FTS5 table <c>message_search_index</c> (<c>tokenize=porter</c>), keyed by message id
-/// and holding <c>plain_text_body</c>. Text creation indexes inside its transaction; attachment creation and
-/// updates retain their after-commit indexing order.
+/// and holding <c>plain_text_body</c>. Message creation indexes inside its transaction.
+/// Updates retain their after-commit indexing order.
 /// </summary>
 public static class MessageSearchIndex
 {
-    /// <summary>How many matches the search page shows (<c>.last(100)</c>).</summary>
+    /// <summary>How many matches the search page shows.</summary>
     public const int SearchLimit = 100;
 
     /// <summary><c>create_in_index</c>.</summary>
@@ -51,8 +49,7 @@ public static class MessageSearchIndex
     }
 
     /// <summary>
-    /// <c>room.messages.search(query)</c>: FTS5 <c>MATCH</c> within one room, in message order. An FTS5 syntax error
-    /// in <paramref name="query"/> surfaces as <see cref="SqliteException"/>, as it does in Rails.
+    /// <c>room.messages.search(query)</c>: quoted FTS5 terms within one room, ordered by creation time.
     /// </summary>
     public static List<Message> SearchInRoom( CampfireDb db, long roomId, string query )
     {
@@ -64,15 +61,14 @@ public static class MessageSearchIndex
                 new
                 {
                     roomId,
-                    query
+                    query = MatchTerms( query )
                 },
                 db.Transaction )
             .AsList( );
     }
 
     /// <summary>
-    /// <c>Current.user.reachable_messages.search(query).last(100)</c> (<c>SearchesController</c>): matches in the
-    /// user's rooms, the newest 100, oldest first.
+    /// <c>Message.search_reachable(user, query)</c>: the newest 100 reachable matches by message id, in ascending id order.
     /// </summary>
     public static List<Message> SearchReachable( CampfireDb db, long userId, string query )
     {
@@ -82,11 +78,11 @@ public static class MessageSearchIndex
                 $"SELECT {Columns.Messages} FROM messages {MessageQueries.ReachableJoin} " +
                 "join message_search_index idx on messages.id = idx.rowid " +
                 $"WHERE {MessageQueries.ReachableWhere} AND (idx.body match @query) " +
-                "ORDER BY messages.created_at DESC LIMIT @limit",
+                "ORDER BY idx.rowid DESC LIMIT @limit",
                 new
                 {
                     userId,
-                    query,
+                    query = MatchTerms( query ),
                     limit = SearchLimit
                 },
                 db.Transaction )
@@ -94,6 +90,10 @@ public static class MessageSearchIndex
         newestFirst.Reverse( );
         return newestFirst;
     }
+
+    private static string MatchTerms( string query ) => string.Join( ' ',
+        query.Split( [' ', '\t', '\n', '\v', '\f', '\r'], StringSplitOptions.RemoveEmptyEntries )
+            .Select( word => '"' + word.Replace( "\"", "\"\"", StringComparison.Ordinal ) + '"' ) );
 
     /// <summary>The indexed text of a message, or null when it has no row.</summary>
     public static string? IndexedBody( CampfireDb db, long messageId )

@@ -36,8 +36,7 @@ public sealed class WebPushDeliveryException : Exception
     public string RubyClass { get; }
 
     /// <summary>
-    /// <c>WebPush::Pool#deliver</c> rescues <c>WebPush::ExpiredSubscription</c> and <c>OpenSSL::OpenSSLError</c> and
-    /// destroys the subscription; everything else is logged and the subscription kept.
+    /// Only a push service's 404 or 410 invalidates a subscription. Local key and TLS errors retain it.
     /// </summary>
     public bool InvalidatesSubscription { get; }
 
@@ -47,9 +46,9 @@ public sealed class WebPushDeliveryException : Exception
     internal static WebPushDeliveryException Argument( string message ) => new( RubyErrorClasses.ArgumentError, message );
 
     internal static WebPushDeliveryException OpenSsl( string rubyClass, string message, Exception? innerException = null ) =>
-        new( rubyClass, message, invalidatesSubscription: true, innerException: innerException );
+        new( rubyClass, message, innerException: innerException );
 
-    /// <summary>A connection failure: TLS errors are <c>OpenSSL::SSL::SSLError</c>, which invalidates the subscription.</summary>
+    /// <summary>Connection failures retain subscriptions, including TLS failures.</summary>
     internal static WebPushDeliveryException From( NetHttpException error ) => error.Failure == NetHttpFailure.Tls
         ? OpenSsl( error.RubyClass, error.Message, error )
         : new WebPushDeliveryException( error.RubyClass, error.Message, innerException: error );
@@ -74,6 +73,6 @@ public sealed class WebPushDeliveryException : Exception
         };
         return rubyClass is null
             ? null
-            : new WebPushDeliveryException( rubyClass, $"host: {host}, status: {status} {reason}", invalidatesSubscription: status == 410, status: status );
+            : new WebPushDeliveryException( rubyClass, $"host: {host}, status: {status} {reason}", invalidatesSubscription: status is 404 or 410, status: status );
     }
 }

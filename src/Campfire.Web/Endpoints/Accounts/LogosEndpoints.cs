@@ -12,7 +12,7 @@ namespace Campfire.Web.Endpoints.Accounts;
 /// <summary>
 /// <c>Accounts::LogosController</c> (<c>app/controllers/accounts/logos_controller.rb</c>): the account logo (or the
 /// stock app icon) as a PNG, public so it can be the PWA icon. It includes <c>ActiveStorage::Streaming</c>, so
-/// responses are live (plan lesson 12). <c>destroy</c> removes the logo.
+/// responses are live. <c>destroy</c> removes the logo.
 /// </summary>
 public static partial class LogosEndpoints
 {

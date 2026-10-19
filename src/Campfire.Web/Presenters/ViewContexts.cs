@@ -101,9 +101,8 @@ public sealed class ViewContexts( CampfireApp app, LayoutAssets layoutAssets )
         };
 
     /// <summary>
-    /// What <c>ApplicationController.render</c> renders broadcasts with: no request, no <c>Current.user</c>, no CSRF
-    /// tokens, and URLs on <paramref name="baseUrl"/>. During a request that is the configured public origin, or else
-    /// the request's protocol and host without its port (<see cref="RendererBaseUrl"/>).
+    /// Creates a broadcast context without request-local user or CSRF state.
+    /// During a request, <paramref name="baseUrl"/> holds the configured public origin or the request origin, including its port.
     /// </summary>
     public ViewContext ForBroadcast( CampfireDb db, string baseUrl, FragmentCache? cache )
     {
@@ -146,18 +145,14 @@ public sealed class ViewContexts( CampfireApp app, LayoutAssets layoutAssets )
     public const string DetachedBaseUrl = "http://example.org";
 
     /// <summary>
-    /// The base of URLs in a broadcast rendered during a request. A broadcast reaches every member of the room, so with
-    /// a configured public origin (<see cref="Hosting.CampfireOptions.PublicOrigin"/>, from <c>TLS_DOMAIN</c>) the
-    /// request's <c>Host</c> never goes into it. Without one, Rails' behavior:
-    /// <c>SetCurrentRequest</c>'s <c>default_url_options</c> carry only <c>request.host</c> and
-    /// <c>request.protocol</c>, so the port comes from the renderer's own env (<c>example.org:80</c>) and never shows
-    /// (plan lesson 13).
+    /// Uses the configured public origin for shared broadcast URLs, keeping a request's Host out of that origin.
+    /// Without one, retains the request's scheme, host and port, as current Rails' <c>default_url_options</c> does.
     /// </summary>
     public static string RendererBaseUrl( RequestContext requestContext )
     {
         ArgumentNullException.ThrowIfNull( requestContext );
 
-        return requestContext.App( ).Options.PublicOrigin ?? requestContext.Request.Protocol + requestContext.Request.Host;
+        return requestContext.App( ).Options.PublicOrigin ?? requestContext.UrlFor( "" );
     }
 
     /// <summary>

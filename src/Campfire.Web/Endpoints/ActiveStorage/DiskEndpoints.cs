@@ -21,7 +21,7 @@ public static partial class DiskEndpoints
         var request = new FileRequest(
             requestContext.Request.Method,
             requestContext.Request.Header( HeaderNames.Range ),
-            requestContext.Request.Header( HeaderNames.IfModifiedSince ) );
+            modified => RackConditionalGet.IsFresh( requestContext.Request.Headers, etag: null, modified ) );
         var served = FileServer.DiskShow( app.Storage.Disk, app.StorageVerifier, encodedKey, request, app.Now );
 
         var result = ActiveStorageBase.ToResponse( served );

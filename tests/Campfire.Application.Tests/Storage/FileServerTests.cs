@@ -95,16 +95,31 @@ public sealed class FileServerTests : IDisposable
         Assert.Equal( "Byte range unsatisfiable\n", Body( served ) );
     }
 
-    [Fact]
-    public void Only_an_exact_if_modified_since_match_is_a_304( )
+    [Theory]
+    [InlineData( "GET", 304 )]
+    [InlineData( "HEAD", 304 )]
+    [InlineData( "POST", 200 )]
+    public void The_http_freshness_policy_receives_file_metadata_before_range_selection( string method, int status )
     {
-        var fresh = FileServer.ServeFile( new FileRequest( "GET", IfModifiedSince: LastModified ), _path, "image/png", "inline" );
-        var later = FileServer.ServeFile( new FileRequest( "GET", IfModifiedSince: "Sat, 26 Sep 2026 12:00:01 GMT" ), _path, "image/png", "inline" );
+        var calls = 0;
+        var request = new FileRequest( method, method == "POST" ? null : "bytes=0-0", modified =>
+        {
+            calls++;
+            Assert.Equal( LastModified, modified );
+            return true;
+        } );
 
-        Assert.Equal( 304, fresh.Status );
-        AssertHeaders( fresh, ("content-type", "image/png"), ("content-disposition", "inline") );
-        Assert.Empty( fresh.Body );
-        Assert.Equal( 200, later.Status );
+        var served = FileServer.ServeFile( request, _path, "image/png", "inline" );
+
+        Assert.Equal( status, served.Status );
+        Assert.Equal( method == "POST" ? 0 : 1, calls );
+        if ( status == 304 )
+        {
+            Assert.Empty( served.Body );
+            Assert.Null( served.Header( "content-type" ) );
+            Assert.Null( served.Header( "content-length" ) );
+            Assert.Null( served.Header( "content-range" ) );
+        }
     }
 
     [Fact]

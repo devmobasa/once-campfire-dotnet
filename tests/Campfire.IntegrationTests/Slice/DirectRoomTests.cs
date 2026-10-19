@@ -85,6 +85,7 @@ public sealed class DirectRoomTests( SharedSliceApp shared ) : IClassFixture<Sha
 
         var root = factory.BaseAddress.ToString( );
         Assert.Equal( (root, root, root), (closed.Location, open.Location, ping.Location) );
+        await SliceWait.UntilAsync( ( ) => factory.Scalar<long>( $"SELECT count(*) FROM rooms WHERE id = {direct}" ) == 0 );
         Assert.Equal( 2, factory.Scalar<long>( $"SELECT count(*) FROM rooms WHERE id IN ({designers}, {hq})" ) );
         Assert.Equal( 0, factory.Scalar<long>( $"SELECT count(*) FROM rooms WHERE id = {direct}" ) );
         Assert.Equal( [$"stream rooms remove list_rooms_direct_{direct}"], factory.Events.Only( "stream" ) );

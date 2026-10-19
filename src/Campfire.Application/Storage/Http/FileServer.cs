@@ -23,8 +23,7 @@ public static class FileServer
     /// <summary>
     /// <c>DiskController#show</c> with the initializer's <c>Cache-Control</c>, which the <c>after_action</c>
     /// adds to every outcome: 404 (empty body) for a bad key or a missing file, else the served file.
-    /// Rack's <c>ETag</c> middleware skips file bodies, so there is no <c>ETag</c>; validation is by
-    /// <c>Last-Modified</c> only.
+    /// File bodies have no <c>ETag</c>. The HTTP layer validates conditional headers against file existence and <c>Last-Modified</c>.
     /// </summary>
     public static ServedFile DiskShow( DiskService disk, ActiveStorageVerifier verifier, string encodedKey, FileRequest request, DateTimeOffset now )
     {
@@ -67,7 +66,11 @@ public static class FileServer
             headers.RemoveAll( header => string.Equals( header.Key, RackHeaderNames.Cascade, StringComparison.OrdinalIgnoreCase ) );
         }
 
-        SetHeader( headers, RackHeaderNames.ContentType, contentType ?? StorageContentTypes.Binary );
+        if ( served.Status != 304 )
+        {
+            SetHeader( headers, RackHeaderNames.ContentType, contentType ?? StorageContentTypes.Binary );
+        }
+
         SetHeader( headers, RackHeaderNames.ContentDisposition, disposition ?? ContentDisposition.Attachment );
 
         return served with
@@ -91,9 +94,9 @@ public static class FileServer
         }
 
         var lastModified = file.LastWriteTimeUtc.ToString( "r", CultureInfo.InvariantCulture );
-        if ( request.IfModifiedSince == lastModified )
+        if ( request.Method is "GET" or "HEAD" && request.IsFresh?.Invoke( lastModified ) == true )
         {
-            return new ServedFile( 304, [], [] );
+            return new ServedFile( 304, [new( RackHeaderNames.LastModified, lastModified )], [] );
         }
 
         var size = file.Length;

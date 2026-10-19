@@ -87,12 +87,12 @@ public sealed class WebPushEncryptionTests
     [InlineData( null, "YXV0aA", "ArgumentError", false )]
     [InlineData( "VALID", "", "ArgumentError", false )]
     [InlineData( "not base64!", "YXV0aA", "ArgumentError", false )]
-    [InlineData( "dGVzdF9rZXk", "YXV0aA", "OpenSSL::PKey::EC::Point::Error", true )]
+    [InlineData( "dGVzdF9rZXk", "YXV0aA", "OpenSSL::PKey::EC::Point::Error", false )]
     [InlineData(
         "123-RIXcMgkdjhRnFZaYjjGvo00dydRQbCpQTuXFjLaCPSE7ofxi19awgGc3Doqa1RmYQqsbQDfQTifFZgc",
         "xxx2DtgvmLkevKRwoyahJl0efg",
         "OpenSSL::PKey::EC::Point::Error",
-        true )]
+        false )]
     public void Rejects_what_the_gem_rejects( string? p256dh, string auth, string rubyClass, bool invalidates )
     {
         using var receiver = new PushReceiver( );
@@ -168,7 +168,7 @@ public sealed class WebPushEncryptionTests
         Assert.True( Verifies( publicKey, jwt.Split( '.' ) ) );
     }
 
-    /// <summary>A set but unusable key raises an OpenSSL error, which the pool answers by destroying the subscription, as in Rails.</summary>
+    /// <summary>An unusable server key fails delivery without invalidating a subscription.</summary>
     [Theory]
     [InlineData( "", "qfXLHghuG1rSHZUVo9SscNRI-0EIHRbIrfeGCqbAwak=" )]
     [InlineData( "BEYXTBB5_jNhNzXDmx5KEU55Vbbd-u--Lk9rM5OFQvUkPIBwZJ9QzAq0zdEzFw6yTV8cTriz_qYBVicY02_VxTQ=", "" )]
@@ -177,7 +177,7 @@ public sealed class WebPushEncryptionTests
     {
         var error = Assert.Throws<WebPushDeliveryException>( ( ) => new VapidKeys( publicKey, privateKey ).Authorization( "https://fcm.googleapis.com", 0 ) );
 
-        Assert.True( error.InvalidatesSubscription );
+        Assert.False( error.InvalidatesSubscription );
         Assert.StartsWith( "OpenSSL::", error.RubyClass, StringComparison.Ordinal );
     }
 

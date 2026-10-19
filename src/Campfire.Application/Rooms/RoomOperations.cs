@@ -61,6 +61,7 @@ public static class RoomOperations
         ArgumentNullException.ThrowIfNull( changes );
 
         var room = RoomQueries.Find( scope.Db, roomId );
+        RoomDeletions.EnsureActive( scope.Db, roomId );
         var original = room.Copy( );
         var typeChanged = changes.Type is { } type && type != room.Type;
         if ( typeChanged && room.Type == RoomType.Direct )
@@ -92,38 +93,8 @@ public static class RoomOperations
         return room;
     }
 
-    /// <summary>
-    /// <c>room.destroy</c>: memberships deleted without callbacks (<c>dependent: :delete_all</c>), then each message
-    /// destroyed with its own callbacks (<c>dependent: :destroy</c>), then the room.
-    /// </summary>
-    public static void Destroy( WriteScope scope, long roomId )
-    {
-        ArgumentNullException.ThrowIfNull( scope );
-
-        var db = scope.Db;
-        var room = RoomQueries.Find( db, roomId );
-        var key = RecordKeys.Room( room.Id );
-        scope.Enlist( key );
-        db.Connection.Execute( "DELETE FROM memberships WHERE room_id = @roomId", new
-        {
-            roomId
-        }, db.Transaction );
-        var messageIds = db.Connection.Query<long>(
-                "SELECT messages.id FROM messages WHERE messages.room_id = @roomId ORDER BY messages.id", new
-                {
-                    roomId
-                }, db.Transaction )
-            .AsList( );
-        foreach ( var messageId in messageIds )
-        {
-            MessageOperations.Destroy( scope, messageId );
-        }
-
-        DataWrites.ExpectOneRow( db.Connection.Execute( "DELETE FROM rooms WHERE id = @roomId", new
-        {
-            roomId
-        }, db.Transaction ), key );
-    }
+    /// <summary>Removes room access now and records recoverable background destruction.</summary>
+    public static void Destroy( WriteScope scope, long roomId ) => RoomDeletions.Start( scope, roomId );
 
     /// <summary>
     /// <c>belongs_to :room, touch: true</c>: <c>touch_later</c> defers the room's <c>updated_at</c> write to just
@@ -143,19 +114,12 @@ public static class RoomOperations
     }
 
     /// <summary>
-    /// <c>room.receive(message)</c>, the message's <c>after_create_commit</c>: marks visible, disconnected members other
-    /// than the creator unread at the message's time, then enqueues <c>Room::PushMessageJob</c>.
+    /// Marks visible, disconnected members other than the creator unread inside the message creation transaction.
     /// </summary>
     /// <remarks>
     /// <c>involvement &lt;&gt; 'invisible'</c> leaves a NULL involvement out, as Rails' <c>where.not(involvement:
     /// :invisible)</c> does (SQL three-valued logic).
     /// </remarks>
-    internal static void Receive( AfterCommitContext context, Message message )
-    {
-        MarkUnread( context.Db, message, context.Now );
-        context.Hooks.PushJobs.PushMessageLater( message.RoomId, message.Id );
-    }
-
     internal static void ReceiveInTransaction( WriteScope scope, Message message ) => MarkUnread( scope.Db, message, scope.Now );
 
     private static void MarkUnread( CampfireDb db, Message message, DateTime now )
@@ -164,7 +128,8 @@ public static class RoomOperations
         db.Connection.Execute(
             "UPDATE memberships SET unread_at = @unreadAt, updated_at = @now " +
             "WHERE memberships.room_id = @roomId AND memberships.involvement <> @invisible " +
-            "AND (memberships.connected_at IS NULL OR memberships.connected_at < @cutoff) AND memberships.user_id <> @creatorId",
+            "AND (memberships.connected_at IS NULL OR memberships.connected_at < @cutoff) AND memberships.user_id <> @creatorId " +
+            "AND (memberships.unread_at IS NULL OR EXISTS (SELECT 1 FROM rooms WHERE rooms.id = @roomId AND rooms.type = @direct))",
             new
             {
                 unreadAt = message.CreatedAt,
@@ -172,7 +137,8 @@ public static class RoomOperations
                 roomId = message.RoomId,
                 invisible = Involvement.Invisible,
                 cutoff,
-                creatorId = message.CreatorId
+                creatorId = message.CreatorId,
+                direct = RoomType.Direct,
             },
             db.Transaction );
     }

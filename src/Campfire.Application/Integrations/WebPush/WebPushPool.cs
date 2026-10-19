@@ -11,7 +11,7 @@ namespace Campfire.Application.Integrations.WebPush;
 /// <see cref="MaxQueue"/> more waiting, as <c>Concurrent::ThreadPoolExecutor.new(max_threads: 50, max_queue: 10000)</c>;
 /// a notification past that is dropped (Rails drops it silently on <c>RejectedExecutionError</c>; this port counts it
 /// in <c>campfire.web_push.dropped</c>). One worker runs the invalid-subscription handler in order, as the gem's
-/// <c>FixedThreadPool(1)</c> does, for deliveries that raised <c>WebPush::ExpiredSubscription</c> or an OpenSSL error.
+/// <c>FixedThreadPool(1)</c> does, for subscriptions that the push service rejected with 404 or 410.
 /// </summary>
 /// <remarks>
 /// A process crash loses what's queued, as a Rails restart does. <see cref="ShutdownAsync"/> stops taking
@@ -201,7 +201,7 @@ public sealed class WebPushPool : IAsyncDisposable
         {
             await _deliver( notification, _abandon.Token );
         }
-        catch ( WebPushDeliveryException error ) when ( error.InvalidatesSubscription )
+        catch ( WebPushDeliveryException error ) when ( error.InvalidatesSubscription && error.Status is 404 or 410 )
         {
             InvalidateLater( notification.SubscriptionId );
         }

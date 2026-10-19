@@ -7,9 +7,8 @@ namespace Campfire.Application.Integrations.Search;
 /// <summary>
 /// <c>SearchesController#query</c> (<c>app/controllers/searches_controller.rb</c>):
 /// <c>params[:q]&amp;.gsub(/[^[:word:]]/, " ")</c>. Every character that isn't one of Onigmo's Unicode word characters
-/// (<see cref="OnigmoWord"/>) becomes one space, so what reaches FTS5's <c>MATCH</c> is words and spaces only. FTS5
-/// still reads bare <c>AND</c>, <c>OR</c> and <c>NOT</c> as operators, and a misplaced one is a syntax error: Rails
-/// answers 500 for <c>?q=NOT</c>, and so does this port (retained Rails behavior).
+/// (<see cref="OnigmoWord"/>) becomes one space. The search index quotes each resulting word before FTS5
+/// <c>MATCH</c>, so <c>AND</c>, <c>OR</c> and <c>NOT</c> match literal terms.
 /// </summary>
 public static class SearchQuery
 {

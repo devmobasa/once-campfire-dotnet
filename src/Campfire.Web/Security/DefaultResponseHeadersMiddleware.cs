@@ -10,19 +10,23 @@ public sealed class DefaultResponseHeadersMiddleware( RequestDelegate next, Http
     {
         httpContext.Response.OnStarting( ( ) =>
         {
-            foreach ( var (name, value) in options.DefaultHeaders )
-            {
-                httpContext.Response.Headers.TryAdd( name, value );
-            }
-
-            httpContext.Response.Headers[CampfireHeaderNames.Version] = version.AppVersion;
-            if ( version.GitRevision is { } revision )
-            {
-                httpContext.Response.Headers[CampfireHeaderNames.Revision] = revision;
-            }
-
+            Apply( httpContext.Response, options, version );
             return Task.CompletedTask;
         } );
         await next( httpContext );
+    }
+
+    internal static void Apply( HttpResponse response, HttpOptions options, CampfireVersion version )
+    {
+        foreach ( var (name, value) in options.DefaultHeaders )
+        {
+            response.Headers.TryAdd( name, value );
+        }
+
+        response.Headers[CampfireHeaderNames.Version] = version.AppVersion;
+        if ( version.GitRevision is { } revision )
+        {
+            response.Headers[CampfireHeaderNames.Revision] = revision;
+        }
     }
 }

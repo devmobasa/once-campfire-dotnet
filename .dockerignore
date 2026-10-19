@@ -2,11 +2,6 @@
 # the Rails post-restore hook, and the pinned Rails app's browser assets and public/ files (the asset
 # pipeline digests them at boot) with the vendored gem assets. Everything else stays out.
 
-/.git
-/.github
-/.claude
-/.vs
-/.idea
 /artifacts
 /TestResults
 /storage
@@ -55,3 +50,9 @@
 
 /Dockerfile
 /.dockerignore
+
+# Exclude hidden local state after all broader source-directory inclusions.
+/.*
+**/.*
+!/reference/app/assets/images/.keep
+!/reference/vendor/javascript/.keep

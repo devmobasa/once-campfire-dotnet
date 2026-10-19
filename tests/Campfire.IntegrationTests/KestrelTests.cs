@@ -14,6 +14,8 @@ namespace Campfire.IntegrationTests;
 /// </summary>
 public sealed class KestrelTests( KestrelAppFactory factory ) : IClassFixture<KestrelAppFactory>
 {
+    private const string HealthBody = "<!DOCTYPE html><html><body style=\"background-color: green\"></body></html>";
+
     [Fact]
     public async Task The_app_listens_on_port_without_a_server_header_and_with_a_real_date( )
     {
@@ -22,8 +24,8 @@ public sealed class KestrelTests( KestrelAppFactory factory ) : IClassFixture<Ke
         using var response = await client.GetAsync( new Uri( Routes.RailsHealthCheck, UriKind.Relative ), TestContext.Current.CancellationToken );
 
         Assert.Equal( HttpStatusCode.OK, response.StatusCode );
-        Assert.Equal( "text/plain", response.Content.Headers.ContentType?.MediaType );
-        Assert.Equal( "OK", await response.Content.ReadAsStringAsync( TestContext.Current.CancellationToken ) );
+        Assert.Equal( "text/html", response.Content.Headers.ContentType?.MediaType );
+        Assert.Equal( HealthBody, await response.Content.ReadAsStringAsync( TestContext.Current.CancellationToken ) );
         Assert.Empty( response.Headers.Server );
         Assert.NotNull( response.Headers.Date );
         Assert.True( Math.Abs( (response.Headers.Date!.Value - DateTimeOffset.UtcNow).TotalMinutes ) < 5, "Date stays on the real clock" );
@@ -42,7 +44,7 @@ public sealed class KestrelTests( KestrelAppFactory factory ) : IClassFixture<Ke
 
         Assert.Equal( HttpStatusCode.OK, response.StatusCode );
         Assert.Empty( await response.Content.ReadAsByteArrayAsync( TestContext.Current.CancellationToken ) );
-        Assert.Equal( "text/plain", response.Content.Headers.ContentType?.MediaType );
+        Assert.Equal( "text/html", response.Content.Headers.ContentType?.MediaType );
         Assert.Null( response.Headers.ETag );
     }
 
@@ -50,7 +52,7 @@ public sealed class KestrelTests( KestrelAppFactory factory ) : IClassFixture<Ke
     public async Task Gzip_goes_out_chunked( )
     {
         using var client = factory.Client( );
-        using var request = new HttpRequestMessage( HttpMethod.Get, new Uri( Routes.RailsHealthCheck, UriKind.Relative ) );
+        using var request = new HttpRequestMessage( HttpMethod.Get, new Uri( EndpointPaths.Campfire.RecedeHistoricalLocation, UriKind.Relative ) );
         request.Headers.AcceptEncoding.ParseAdd( "gzip" );
 
         using var response = await client.SendAsync( request, TestContext.Current.CancellationToken );
@@ -58,7 +60,7 @@ public sealed class KestrelTests( KestrelAppFactory factory ) : IClassFixture<Ke
 
         Assert.Equal( ["gzip"], response.Content.Headers.ContentEncoding );
         Assert.True( response.Headers.TransferEncodingChunked );
-        Assert.Equal( "OK", Gunzip( body ) );
+        Assert.Equal( "Going back…", Gunzip( body ) );
     }
 
     [Theory]
@@ -85,7 +87,7 @@ public sealed class KestrelTests( KestrelAppFactory factory ) : IClassFixture<Ke
 
         if ( method == "get" )
         {
-            Assert.Equal( "OK", response.Body );
+            Assert.Equal( HealthBody, response.Body );
         }
     }
 

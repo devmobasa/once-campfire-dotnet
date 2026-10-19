@@ -11,7 +11,7 @@ namespace Campfire.Web.Tests.Views;
 
 /// <summary>
 /// Fragment caching through the views: keys cover every input that changes a fragment, the store is consulted
-/// before a view model is built (plan lesson 3), and stored fragments carry nothing viewer-specific.
+/// before a view model is built, and stored fragments carry nothing viewer-specific.
 /// </summary>
 public sealed class FragmentRenderingTests
 {

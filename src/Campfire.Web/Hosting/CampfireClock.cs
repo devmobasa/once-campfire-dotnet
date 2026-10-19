@@ -5,7 +5,7 @@ namespace Campfire.Web.Hosting;
 /// <summary>
 /// The business clock. The parity harness passes libfaketime's <c>FAKETIME</c> (and, when
 /// freezing, <c>CAMPFIRE_FROZEN_TIME</c>); the .NET entrypoint reads them itself instead of preloading
-/// libfaketime, so Kestrel's <c>Date</c> header stays on the real clock (plan lesson 10):
+/// libfaketime, so Kestrel's <c>Date</c> header stays on the real clock:
 /// <list type="bullet">
 /// <item><c>CAMPFIRE_FROZEN_TIME</c> (RFC 3339 or <c>YYYY-MM-DD HH:MM:SS</c>): frozen;</item>
 /// <item><c>FAKETIME=@YYYY-MM-DD HH:MM:SS</c>: starts at that instant and ticks;</item>

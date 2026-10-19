@@ -15,7 +15,8 @@ public static class MessageAttachments
     /// <summary>
     /// Attaches the blob in place of the current attachment (purged after commit); the new attachment's
     /// <c>belongs_to :record, touch: true</c> touches the message and so its room. The blob the message has already
-    /// keeps its attachment, which saves nothing and touches nothing. Returns the blob and the attachment.
+    /// keeps its attachment and touches nothing. Every assignment refreshes the search text after commit.
+    /// Returns the blob and the attachment.
     /// </summary>
     /// <exception cref="RecordNotFoundException">The message or the blob is gone.</exception>
     public static AttachedBlob AttachBlob( WriteScope scope, long messageId, SignedBlobAttachment blob )
@@ -24,7 +25,9 @@ public static class MessageAttachments
         ArgumentNullException.ThrowIfNull( blob );
 
         var message = MessageQueries.Find( scope.Db, messageId );
+        scope.Enlist( RecordKeys.Message( messageId ) );
         var attached = AttachedOne.AttachBlob( scope, new AttachmentOwner( Message.RecordType, message.Id ), Message.AttachmentName, blob );
+        MessageOperations.ReindexAfterCommit( scope, messageId );
         if ( attached.Created )
         {
             MessageOperations.TouchLaterWithoutReindex( scope, message );
@@ -35,7 +38,7 @@ public static class MessageAttachments
 
     /// <summary>
     /// <c>DeleteOne#save</c>: <c>record.attachment_attachment = nil</c> destroys the current attachment (its blob purged
-    /// after commit), and the destroyed attachment touches the message and its room. Nothing happens without one.
+    /// after commit), and the destroyed attachment touches the message and its room. Assignment refreshes search text even without an attachment.
     /// Returns whether there was one.
     /// </summary>
     /// <exception cref="RecordNotFoundException">The message is gone.</exception>
@@ -44,6 +47,8 @@ public static class MessageAttachments
         ArgumentNullException.ThrowIfNull( scope );
 
         var message = MessageQueries.Find( scope.Db, messageId );
+        scope.Enlist( RecordKeys.Message( messageId ) );
+        MessageOperations.ReindexAfterCommit( scope, messageId );
         if ( !AttachedOne.Remove( scope, new AttachmentOwner( Message.RecordType, message.Id ), Message.AttachmentName ) )
         {
             return false;

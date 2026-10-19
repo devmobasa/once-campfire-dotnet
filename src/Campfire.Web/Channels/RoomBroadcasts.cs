@@ -47,7 +47,7 @@ public sealed partial class RoomBroadcasts( CableServer cable, TurboStreamNames 
 
     /// <summary>
     /// <c>Message#broadcast_create</c>: the rendered <c>messages/_message</c> appended to <c>[ room, :messages ]</c>,
-    /// then <see cref="UnreadRoom"/> for each member. Returns <c>messages/create.turbo_stream</c> as rendered (the
+    /// returning <c>messages/create.turbo_stream</c> as rendered (the
     /// template's own trailing newline included); the broadcast is the same <c>&lt;turbo-stream&gt;</c> without it, as
     /// <c>turbo_stream_action_tag</c> builds it.
     /// </summary>
@@ -55,29 +55,29 @@ public sealed partial class RoomBroadcasts( CableServer cable, TurboStreamNames 
         Room room,
         ViewContext broadcastContext,
         MessageItem message,
-        IReadOnlyList<long> memberUserIds,
         CancellationToken cancellationToken )
     {
         ArgumentNullException.ThrowIfNull( room );
-        ArgumentNullException.ThrowIfNull( memberUserIds );
-
         var html = await Broadcasts.MessageCreatedUtf8( broadcastContext, message, RoomPresentation.Kind( room.Type ), cancellationToken );
         Cable.BroadcastStreamToUtf8( RoomMessages( room ), WithoutTrailingNewline( html ) );
-        UnreadRoom( room.Id, memberUserIds );
         return html;
     }
 
     /// <summary>
-    /// <c>broadcast_unread_room</c>: <c>{ roomId: }</c> to each member's <c>user_&lt;id&gt;_unreads</c>
-    /// (<c>room.memberships.pluck(:user_id)</c>, invisible members included).
+    /// <c>broadcast_unread_room</c>: one timestamped payload to each current unread or connected member's unread stream.
     /// </summary>
-    public void UnreadRoom( long roomId, IEnumerable<long> memberUserIds )
+    public async Task UnreadRoomAsync( long roomId, DateTime createdAt, IAsyncEnumerable<long> memberUserIds, CancellationToken cancellationToken )
     {
         ArgumentNullException.ThrowIfNull( memberUserIds );
 
-        var payload = JsonPayload.Encode( new JsonObject { ["roomId"] = roomId } );
-        foreach ( var userId in memberUserIds )
+        var payload = JsonPayload.Encode( new JsonObject
         {
+            ["roomId"] = roomId,
+            ["at"] = (createdAt - DateTime.UnixEpoch).TotalSeconds,
+        } );
+        await foreach ( var userId in memberUserIds.WithCancellation( cancellationToken ) )
+        {
+            cancellationToken.ThrowIfCancellationRequested( );
             Cable.BroadcastEncoded( UnreadRoomsChannel.StreamNameFor( userId ), payload );
         }
     }
@@ -86,9 +86,13 @@ public sealed partial class RoomBroadcasts( CableServer cable, TurboStreamNames 
     public void MessageRemoved( Room room, string clientMessageId ) =>
         Cable.BroadcastStreamTo( RoomMessages( room ), Broadcasts.MessageRemoved( clientMessageId ).Html );
 
-    /// <summary><c>PresenceChannel#broadcast_read_room</c>: <c>{ room_id: }</c> to <c>user_&lt;id&gt;_reads</c>.</summary>
-    public void ReadRoom( long userId, long roomId ) =>
-        Cable.Broadcast( ReadRoomsChannel.StreamNameFor( userId ), new JsonObject { ["room_id"] = roomId } );
+    /// <summary><c>PresenceChannel#broadcast_read_room</c>: <c>{ room_id:, at: }</c> to <c>user_&lt;id&gt;_reads</c>.</summary>
+    public void ReadRoom( long userId, long roomId, DateTimeOffset at ) =>
+        Cable.Broadcast( ReadRoomsChannel.StreamNameFor( userId ), new JsonObject
+        {
+            ["room_id"] = roomId,
+            ["at"] = (at - DateTimeOffset.UnixEpoch).TotalSeconds,
+        } );
 
     /// <summary>The rendered template without its own trailing newline, as <c>turbo_stream_action_tag</c> builds the tag.</summary>
     private static ReadOnlySpan<byte> WithoutTrailingNewline( byte[] html )

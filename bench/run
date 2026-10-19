@@ -15,7 +15,7 @@
 # `rust-identity` is the Rust image again, running only the HTTP suite with
 # `Accept-Encoding: identity`: the app's cost without gzip.
 #
-# PATCH (the .NET port's benchmark, plan v3 section 10, docs/benchmarks.md): an app is a target and variants,
+# The benchmark supports a target and its variants (docs/benchmarks.md):
 #   TARGET[-listener][-identity][-index][-counters]
 # with TARGET one of reference, rust (RUST_IMAGE), rust-v0.1.1 (RUST_V011_IMAGE, the published release, diverged
 # from Rails), dotnet, dotnet-aot, dotnet-jit:
@@ -38,8 +38,8 @@
 #   C_IMAGE          explicit immutable image ID for the pinned C port (c target)
 #   RUST_V011_IMAGE  campfire-rust:v0.1.1     (PATCH: bench/images; --apps rust-v0.1.1)
 #   DOTNET_IMAGE     campfire-dotnet:app      (PATCH: the .NET port's /Dockerfile; --apps reference,dotnet)
-#   DOTNET_AOT_IMAGE campfire-dotnet:aot      (PATCH: /Dockerfile's default `aot` stage, Native AOT; --apps dotnet-aot)
-#   DOTNET_JIT_IMAGE campfire-dotnet:jit      (PATCH: /Dockerfile's `jit` stage, the same code on the runtime; --apps dotnet-jit)
+#   DOTNET_AOT_IMAGE campfire-dotnet:aot      (PATCH: /Dockerfile's named `aot` stage, Native AOT, --apps dotnet-aot)
+#   DOTNET_JIT_IMAGE campfire-dotnet:jit      (PATCH: /Dockerfile's default `jit` stage, the same code on the runtime, --apps dotnet-jit)
 #
 # Knobs (env): SERVER_CPUS=8-11 LOADGEN_CPUS=12-15 HTTP_SECS=8 HTTP_CONCS="1 16 64"
 #   CABLE_CLIENTS="100 500 1000" CABLE_TPUT_SECS=15 CABLE_POSTERS=4 UPLOAD_REPS=5 PORT=4390
@@ -127,7 +127,7 @@ CABLE_LATENCY_MSGS=${CABLE_LATENCY_MSGS:-30}
 REDIS_PORT=${REDIS_PORT:-$((PORT + 2))}
 CONTAINER_NOFILE=${CONTAINER_NOFILE:-65536}
 CONTAINER_PREFIX=${CONTAINER_PREFIX:-bench-campfire}
-BENCH_OWNER=${BENCH_OWNER:-${CLAUDE_CODE_SESSION_ID:-$(id -un)}}
+BENCH_OWNER=${BENCH_OWNER:-$(id -un)}
 COUNTERS_CONFIG=${COUNTERS_CONFIG:-Microsoft-Windows-DotNETRuntime:0x1:5,System.Runtime:0:4:EventCounterIntervalSec=1}
 COUNTERS_BUFFER_MB=${COUNTERS_BUFFER_MB:-400} # hexadecimal: 0x400 = 1024 MB; counter variants only
 COUNTERS_STREAMING=${COUNTERS_STREAMING:-1} # PATCH: 0 buffers until shutdown; 1 streams during the workload.
@@ -488,11 +488,7 @@ route_request() {
     static_css) REQUEST=(--path "$CSS"); EXPECT+=(--expect-type text/css) ;;
     up)
       REQUEST=(--path /up)
-      if [[ "$(base_app "$app")" = dotnet* ]] && [ "${DOTNET_NATIVE_SECURITY:-1}" = 1 ]; then
-        EXPECT+=(--expect-type text/plain --expect-body 'OK')
-      else
-        EXPECT+=(--expect-type text/html --expect-body "background-color: green")
-      fi ;;
+      EXPECT+=(--expect-type text/html --expect-body "background-color: green") ;;
     post_message) REQUEST=(--post-room "$WRITE_ROOM" --csrf "$CSRF"); EXPECT+=(--expect-type text/vnd.turbo-stream.html --expect-echo 1) ;;
     *) echo "unknown route $name (routes: $ALL_ROUTES)" >&2; return 1 ;;
   esac
@@ -570,7 +566,6 @@ run_rep() {
 
   local cookie scrape csrf streams css
   local auth_cookie=session_token
-  if [[ "$(base_app "$app")" = dotnet* ]] && [ "${DOTNET_NATIVE_SECURITY:-1}" = 1 ]; then auth_cookie=.Campfire.Auth; fi
   cookie=$(lg login --base "$url" --auth-cookie-name "$auth_cookie" --email "$EMAIL" --password "$PASSWORD" | python3 -c 'import json,sys; print(json.load(sys.stdin)["cookie"])')
   scrape=$(lg scrape --base "$url" --cookie "$cookie" --room "$ROOM")
   if [ "$BENCH_LAST_ROOM_COOKIE" = 1 ]; then
@@ -729,7 +724,7 @@ import json, sys
 NOTES = {
   "reference": "Rails at the pinned commit: Puma, Resque, Redis and Thruster",
   "rust": "the Rust port at its parity commit: one process with its own front server in place of Thruster",
-  "rust-v0.1.1": "DIVERGED from Rails (plan v3 section 10): no CSRF tokens, cached page parts, the extra index, "
+  "rust-v0.1.1": "Differs from Rails: no CSRF tokens, cached page parts, the extra index, "
                  "compressed cable frames shared across subscribers (permessage-deflate), cookies sent only when they "
                  "change, and the leaner media build",
   "dotnet": "the .NET port behind Thruster",

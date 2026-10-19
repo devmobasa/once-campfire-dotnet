@@ -10,13 +10,17 @@ namespace Campfire.Web.Endpoints.ActiveStorage;
 public static partial class RepresentationsProxyEndpoints
 {
     /// <summary>
-    /// <c>http_cache_forever public: true do send_blob_stream @representation, disposition: params[:disposition] end</c>.
+    /// Checks processed-file availability before conditional validation, then streams a changed representation.
     /// </summary>
     private static Task<FrontendResult> ShowAsync( RequestContext requestContext )
     {
         var image = RepresentationsRedirectEndpoints.RepresentationOf( requestContext );
-        var response = ActiveStorageBase.HttpCacheForever( requestContext )
-            ?? ActiveStorageBase.SendBlobStream( requestContext, image, requestContext.Param( ParamNames.ActiveStorage.Disposition ) );
+        var response = ActiveStorageBase.SendBlobStream( requestContext, image, requestContext.Param( ParamNames.ActiveStorage.Disposition ) );
+        if ( response.Status == StatusCodes.Status200OK )
+        {
+            response = ActiveStorageBase.HttpCacheForever( requestContext ) ?? response;
+        }
+
         response.Live = true;
         return Task.FromResult( response );
     }

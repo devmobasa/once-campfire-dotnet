@@ -39,6 +39,8 @@ internal sealed class FrontResponseCache( FrontServerOptions options )
         int Status,
         Dictionary<string, StringValues> Headers,
         byte[] Body,
+        DateTimeOffset Created,
+        long InitialAgeSeconds,
         DateTimeOffset Expires,
         long Size )
     {
@@ -179,12 +181,13 @@ internal sealed class FrontResponseCache( FrontServerOptions options )
         return node;
     }
 
-    public void Store( HttpRequest request, HttpResponse response, byte[] body, TimeSpan lifetime )
+    public void Store( HttpRequest request, HttpResponse response, byte[] body, TimeSpan lifetime, DateTimeOffset? createdAt = null )
     {
         var key = Key( request );
         var headers = response.Headers.ToDictionary( pair => pair.Key, pair => new StringValues( pair.Value.ToArray( ) ), StringComparer.OrdinalIgnoreCase );
         headers.Remove( HeaderNames.SetCookie );
         headers.Remove( HeaderNames.Date ); // Each connection gets Kestrel's current Date, including cache hits.
+        headers.Remove( HeaderNames.Age ); // Hits calculate age from the original response, never from its last reuse.
         // Kestrel's chunk framing belongs to this connection. Replaying Transfer-Encoding would make
         // it treat a cached payload as already framed, leaving the client waiting for a chunk terminator.
         foreach ( var name in response.Headers.Connection.ToString( ).Split( ',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries ) )
@@ -217,8 +220,11 @@ internal sealed class FrontResponseCache( FrontServerOptions options )
         }
 
         var now = DateTimeOffset.UtcNow;
-        var expires = lifetime > DateTimeOffset.MaxValue - now ? DateTimeOffset.MaxValue : now + lifetime;
-        var entry = new Entry( key, variantKey, response.StatusCode, headers, body, expires, size );
+        var created = createdAt ?? now;
+        var initialAge = InitialAge( response.Headers.Age.ToString( ) );
+        var remaining = initialAge >= lifetime.TotalSeconds ? TimeSpan.Zero : lifetime - TimeSpan.FromSeconds( initialAge );
+        var expires = remaining > DateTimeOffset.MaxValue - created ? DateTimeOffset.MaxValue : created + remaining;
+        var entry = new Entry( key, variantKey, response.StatusCode, headers, body, created, initialAge, expires, size );
         lock ( _gate )
         {
             if ( _variants.TryGetValue( key, out var previous ) )
@@ -240,6 +246,11 @@ internal sealed class FrontResponseCache( FrontServerOptions options )
                 }
             }
 
+            if ( expires <= now )
+            {
+                return;
+            }
+
             while ( _bytes > options.CacheBytes - size && _lru.Last is { } oldest )
             {
                 Remove( oldest );
@@ -255,6 +266,18 @@ internal sealed class FrontResponseCache( FrontServerOptions options )
             variants.Entries.Add( variantKey, _lru.AddFirst( entry ) );
             _bytes += size;
         }
+    }
+
+    private static long InitialAge( string value )
+    {
+        var age = value.AsSpan( );
+        var comma = age.IndexOf( ',' );
+        if ( comma >= 0 )
+        {
+            age = age[..comma];
+        }
+
+        return long.TryParse( age.Trim( ), NumberStyles.None, CultureInfo.InvariantCulture, out var seconds ) && seconds >= 0 ? seconds : 0;
     }
 
     private void Remove( LinkedListNode<Entry> node )

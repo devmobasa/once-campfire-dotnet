@@ -1,4 +1,4 @@
 namespace Campfire.Application.Storage.Http;
 
-/// <summary>The request fields <c>Rack::Files#serving</c> reads.</summary>
-public sealed record FileRequest( string Method, string? Range = null, string? IfModifiedSince = null );
+/// <summary>File response inputs. The HTTP layer supplies conditional validation over the file's Last-Modified value.</summary>
+public sealed record FileRequest( string Method, string? Range = null, Func<string, bool>? IsFresh = null );

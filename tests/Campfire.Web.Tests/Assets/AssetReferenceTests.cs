@@ -9,14 +9,14 @@ namespace Campfire.Web.Tests.Assets;
 /// <summary>
 /// Golden tests against what the Rails app produced: <c>vectors/assets/*</c>, written by
 /// <c>reference-tools/assets</c> from <c>assets:precompile</c> and the real Rails helpers. Ported
-/// from Rust <c>crates/assets/tests/reference.rs</c>.
+/// from Rust <c>crates/assets/tests/reference.rs</c>. Three current Rails overlays have explicit expectations.
 /// </summary>
 public sealed class AssetReferenceTests( AssetFixture fixture ) : IClassFixture<AssetFixture>
 {
     [Fact]
     public void Manifest_matches_the_reference_precompile( )
     {
-        var reference = AssetFixture.JsonVector( "manifest.json" ).AsObject( )
+        var reference = CurrentRailsAssetExpectations.Manifest( )
             .ToDictionary( entry => entry.Key, entry => entry.Value!["digested_path"]!.GetValue<string>( ), StringComparer.Ordinal );
         var ours = fixture.Catalog.Manifest.ToDictionary( StringComparer.Ordinal );
 
@@ -32,7 +32,7 @@ public sealed class AssetReferenceTests( AssetFixture fixture ) : IClassFixture<
 
         // The served manifest has the same entries; only the order (readdir vs. load path) can differ.
         var served = JsonNode.Parse( fixture.Catalog.ManifestJson )!.AsObject( );
-        var referenceJson = AssetFixture.JsonVector( "manifest.json" ).AsObject( );
+        var referenceJson = CurrentRailsAssetExpectations.Manifest( );
         Assert.Equal( referenceJson.Count, served.Count );
         foreach ( var (logical, entry) in referenceJson )
         {
@@ -43,7 +43,7 @@ public sealed class AssetReferenceTests( AssetFixture fixture ) : IClassFixture<
     [Fact]
     public void Compiled_files_are_byte_identical_to_the_reference_precompile( )
     {
-        var reference = AssetFixture.JsonVector( "compiled_sha256.json" ).AsObject( );
+        var reference = CurrentRailsAssetExpectations.CompiledHashes( );
         var mismatched = new List<string>( );
         foreach ( var (digestedPath, expected) in reference )
         {
@@ -69,12 +69,21 @@ public sealed class AssetReferenceTests( AssetFixture fixture ) : IClassFixture<
 
     [Fact]
     public void Javascript_importmap_tags_match_the_reference( ) =>
-        Assert.Equal( AssetFixture.Vector( "javascript_importmap_tags.html" ), fixture.Tags.JavascriptImportmapTags( ) );
+        Assert.Equal( CurrentRailsAssetExpectations.ImportmapTags( ), fixture.Tags.JavascriptImportmapTags( ) );
+
+    [Fact]
+    public void Current_rails_overlays_take_precedence_over_the_pinned_reference_assets( )
+    {
+        foreach ( var overlay in CurrentRailsAssetExpectations.Overlays )
+        {
+            Assert.Equal( overlay.DigestedPath, fixture.Catalog.DigestedPath( overlay.LogicalPath ) );
+        }
+    }
 
     [Fact]
     public void Public_and_asset_files_are_served_like_action_dispatch_static( )
     {
-        var cases = AssetFixture.JsonVector( "static_responses.json" ).AsArray( );
+        var cases = CurrentRailsAssetExpectations.StaticCases( );
         Assert.NotEmpty( cases );
 
         foreach ( var testCase in cases )

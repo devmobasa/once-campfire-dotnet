@@ -11,6 +11,44 @@ namespace Campfire.Application.Tests.Data;
 public sealed class SchemaSetupTests
 {
     [Fact]
+    public void A_rails_database_prepares_cleanup_without_changing_migration_metadata( )
+    {
+        using var connection = new SqliteConnection( "Data Source=:memory:" );
+        connection.Open( );
+        SchemaSetup.Load( connection, "test", TimeProvider.System );
+        var metadata = Sql.Scalar( connection, "SELECT group_concat(key||'='||value) FROM ar_internal_metadata" );
+        SchemaSetup.Prepare( connection, "test", TimeProvider.System );
+        SchemaSetup.Prepare( connection, "test", TimeProvider.System );
+        Assert.Equal( 3L, Sql.Scalar( connection, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('campfire_room_deletions','campfire_room_deletion_members','campfire_cleanup')" ) );
+        Assert.Equal( metadata, Sql.Scalar( connection, "SELECT group_concat(key||'='||value) FROM ar_internal_metadata" ) );
+        Assert.Equal( 15L, Sql.Scalar( connection, "SELECT COUNT(*) FROM schema_migrations" ) );
+    }
+
+    [Fact]
+    public async Task A_changed_cleanup_table_is_rejected_before_boot_repairs_other_objects( )
+    {
+        using var test = await TestDatabase.CreateAsync( fixtures: false );
+        await test.ExecuteAsync( "ALTER TABLE campfire_cleanup ADD COLUMN unexpected TEXT" );
+        await test.ExecuteAsync( "DROP INDEX campfire_cleanup_due" );
+        using var connection = test.OpenSideConnection( );
+        var failure = Assert.Throws<SchemaMismatchException>( ( ) => SchemaSetup.Prepare( connection, "test", TimeProvider.System ) );
+        Assert.Contains( "cleanup object campfire_cleanup differs", failure.Message, StringComparison.Ordinal );
+        Assert.Equal( 0L, Sql.Scalar( connection, "SELECT COUNT(*) FROM sqlite_master WHERE name='campfire_cleanup_due'" ) );
+    }
+
+    [Fact]
+    public async Task A_missing_cleanup_index_is_restored_without_losing_pending_work( )
+    {
+        using var test = await TestDatabase.CreateAsync( fixtures: false );
+        await test.ExecuteAsync( "INSERT INTO campfire_room_deletions (room_id,phase,created_at,next_attempt_at) VALUES (12,0,@p0,@p0)", test.Clock.Now );
+        await test.ExecuteAsync( "DROP INDEX campfire_cleanup_due" );
+        using var connection = test.OpenSideConnection( );
+        SchemaSetup.Prepare( connection, "test", TimeProvider.System );
+        Assert.Equal( 1L, Sql.Scalar( connection, "SELECT COUNT(*) FROM sqlite_master WHERE name='campfire_cleanup_due'" ) );
+        Assert.Equal( 1L, Sql.Scalar( connection, "SELECT COUNT(*) FROM campfire_room_deletions WHERE room_id=12" ) );
+    }
+
+    [Fact]
     public async Task An_empty_database_gets_schema_sql_with_its_migration_and_metadata_rows( )
     {
         using var testDatabase = await TestDatabase.CreateAsync( fixtures: false );
@@ -44,17 +82,6 @@ public sealed class SchemaSetupTests
     public async Task The_pinned_schema_is_accepted_on_the_next_boot( )
     {
         var directory = await CreatePreparedDatabaseAsync( );
-
-        using var database = Open( directory );
-
-        Assert.Equal( SchemaPreparation.Accepted, database.Preparation );
-    }
-
-    [Fact]
-    public async Task The_pinned_schema_with_the_rust_index_is_accepted( )
-    {
-        var directory = await CreatePreparedDatabaseAsync( );
-        Alter( directory, "CREATE INDEX IF NOT EXISTS \"index_messages_on_room_id_and_created_at\" ON \"messages\" (\"room_id\", \"created_at\")" );
 
         using var database = Open( directory );
 
@@ -174,7 +201,7 @@ public sealed class SchemaSetupTests
 
         // No query reads whole rows of these: SchemaSetup's own statements cover the framework tables, and variant
         // records are looked up for their id alone.
-        string[] frameworkTables = ["active_storage_variant_records", "ar_internal_metadata", "schema_migrations"];
+        string[] frameworkTables = ["active_storage_variant_records", "ar_internal_metadata", "schema_migrations", "campfire_cleanup", "campfire_room_deletions", "campfire_room_deletion_members"];
         var read = Columns.ByTable.ToDictionary(
             entry => entry.Key,
             entry => entry.Value.Split( ", " ).Select( column => Unqualified( entry.Key, column ) ).Order( StringComparer.Ordinal ).ToList( ) );

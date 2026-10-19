@@ -80,7 +80,7 @@ public sealed class PresenceChannel( CampfireApp app ) : RoomChannel( app )
                 "undefined method 'room_id' for nil (PresenceChannel#broadcast_read_room: the membership is gone)" );
         }
 
-        App.Broadcasts.ReadRoom( CurrentUser.Id, Room!.Id );
+        App.Broadcasts.ReadRoom( CurrentUser.Id, Room!.Id, App.Now );
     }
 
     /// <summary><c>absent</c>: <c>membership.disconnected</c>.</summary>

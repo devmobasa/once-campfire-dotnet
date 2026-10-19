@@ -154,7 +154,7 @@ internal sealed partial class FrontServerMiddleware(
             var bytes = await captured.CapturedAsync( httpContext.RequestAborted );
             if ( bytes is not null && captured.Lifetime is { } lifetime )
             {
-                cache.Store( httpContext.Request, httpContext.Response, bytes, lifetime );
+                cache.Store( httpContext.Request, httpContext.Response, bytes, lifetime, captured.CreatedAt );
             }
         }
         finally
@@ -171,8 +171,10 @@ internal sealed partial class FrontServerMiddleware(
         }
 
         httpContext.Response.Headers[CampfireHeaderNames.Cache] = CacheHit;
-        var etag = httpContext.Response.Headers.ETag.ToString( );
-        var notModified = etag.Length != 0 && httpContext.Request.Headers.IfNoneMatch.ToString( ).Split( ',' ).Any( token => token.Trim( ) == etag );
+        var residentSeconds = ( long ) Math.Max( 0, (DateTimeOffset.UtcNow - entry.Created).TotalSeconds );
+        httpContext.Response.Headers.Age = (entry.InitialAgeSeconds + residentSeconds).ToString( CultureInfo.InvariantCulture );
+        var notModified = entry.Status == StatusCodes.Status200OK
+            && RackConditionalGet.IsFresh( httpContext.Request.Headers, httpContext.Response.Headers.ETag.ToString( ), httpContext.Response.Headers.LastModified.ToString( ) );
         httpContext.Response.StatusCode = notModified ? StatusCodes.Status304NotModified : entry.Status;
         if ( notModified )
         {

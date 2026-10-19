@@ -1,5 +1,8 @@
 using System.Net;
+using System.Text.Json.Nodes;
+using Campfire.Application.Rooms;
 using Campfire.IntegrationTests.Support;
+using Campfire.Web.Channels;
 using Campfire.Web.Paths;
 
 namespace Campfire.IntegrationTests.Slice;
@@ -22,18 +25,28 @@ public sealed class MessageCreateTests( SliceAppFactory factory ) : IClassFixtur
         var token = await client.CsrfTokenAsync( Routes.Room( Designers ) );
         using var taps = await SliceTaps.OnRoomAsync( factory, Designers );
         factory.Events.Clear( );
+        var room = await factory.App.Database.ReadAsync( db => RoomQueries.Find( db, Designers ), TestContext.Current.CancellationToken );
+        string? broadcast = null;
+        using var append = factory.App.Cable.Hub.Subscribe( string.Join( ':', RoomBroadcasts.RoomMessages( room ) ),
+            payload => broadcast = JsonNode.Parse( payload )!.GetValue<string>( ) );
 
-        // Step 1 (the search index insert) has committed on its own by the time the file is placed.
+        // All creation rows, indexing, and unread marking commit before file publication.
+        string? unreadAtUpload = null;
         factory.Faults.DuringUpload = ( ) =>
         {
             var indexed = factory.Scalar<long>( """
                 SELECT count(*) FROM message_search_index i JOIN messages m ON m.id = i.rowid WHERE m.client_message_id = 'sequence-image'
                 """ ) == 1;
             factory.Events.Record( indexed ? "indexed" : "not indexed" );
+            unreadAtUpload = SliceRows.UnreadAt( factory, "jason_designers" );
         };
 
         var reply = await client.PostMessageAsync( Designers, token, file: SliceFiles.Moon( ), clientMessageId: "sequence-image" );
+        var unreadJobs = factory.App.Jobs.BroadcastUnreadRoom;
+        var enqueued = unreadJobs.Counters.Enqueued;
+        await SliceWait.UntilAsync( ( ) => unreadJobs.Counters.Performed + unreadJobs.Counters.Failed >= enqueued );
 
+        Assert.Equal( reply.Body.TrimEnd( '\n' ), broadcast );
         Assert.Equal( HttpStatusCode.OK, reply.Status );
         Assert.Equal( "text/vnd.turbo-stream.html; charset=utf-8", reply.ContentType );
         Assert.StartsWith( $"<turbo-stream action=\"append\" target=\"messages_rooms_closed_{Designers}\">", reply.Body, StringComparison.Ordinal );
@@ -43,6 +56,7 @@ public sealed class MessageCreateTests( SliceAppFactory factory ) : IClassFixtur
         Assert.DoesNotContain( "authenticity_token", reply.Body, StringComparison.Ordinal );
 
         var message = SliceRows.Message( factory, "sequence-image" );
+        Assert.Equal( message.CreatedAt, unreadAtUpload );
         var blob = SliceRows.AttachedBlob( factory, message.Id );
         var steps = SliceSequence.Steps( factory.Events, message.Id, blob.Id );
         Assert.Equal(
@@ -55,9 +69,9 @@ public sealed class MessageCreateTests( SliceAppFactory factory ) : IClassFixtur
             ],
             steps.Take( 5 ) );
 
-        // Then { roomId: } to every member's unread stream, in membership order.
+        // The background notice reaches members whose room remains unread or connected.
         Assert.Equal(
-            DesignersMembers.Select( user => $"unread user {SliceAppFactory.Id( user )}" ).Order( StringComparer.Ordinal ),
+            DesignersMembers.Where( user => user != "david" ).Select( user => $"unread user {SliceAppFactory.Id( user )}" ).Order( StringComparer.Ordinal ),
             steps.Skip( 5 ).Order( StringComparer.Ordinal ) );
 
         Assert.Equal( 1, factory.Scalar<long>( $"SELECT count(*) FROM message_search_index WHERE rowid = {message.Id}" ) );

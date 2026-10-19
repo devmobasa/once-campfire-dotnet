@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using Campfire.Web.Http;
 using Campfire.Web.Views.Models;
 using RazorSlices;
@@ -5,7 +6,7 @@ using RazorSlices;
 namespace Campfire.Web.Views.Rendering;
 
 /// <summary>
-/// How the rest of the app renders a slice: always with <see cref="RailsHtmlEncoder"/>. Pages render once into owned
+/// How the rest of the app renders a slice: Rails write members with <see cref="HtmlEncoder.Default"/> as a fallback. Pages render once into owned
 /// UTF-8 memory for the response (<see cref="RenderPageAsync"/>); fragments and broadcasts go to a string or UTF-8
 /// bytes.
 /// </summary>
@@ -16,7 +17,7 @@ public static class SliceRenderer
     {
         ArgumentNullException.ThrowIfNull( slice );
 
-        return slice.RenderAsync( RailsHtmlEncoder.Instance, cancellationToken );
+        return slice.RenderAsync( HtmlEncoder.Default, cancellationToken );
     }
 
     /// <summary>Renders <paramref name="slice"/> as trusted markup, for caching or embedding in another render.</summary>
@@ -52,7 +53,7 @@ public static class SliceRenderer
 
         try
         {
-            await slice.RenderAsync( buffer, RailsHtmlEncoder.Instance, cancellationToken );
+            await slice.RenderAsync( buffer, HtmlEncoder.Default, cancellationToken );
             var body = buffer.TakeBody( recorder?.Take( buffer.Length ) );
             body.ValidUntil = recorder?.ValidUntil ?? DateTimeOffset.MaxValue;
             return body;

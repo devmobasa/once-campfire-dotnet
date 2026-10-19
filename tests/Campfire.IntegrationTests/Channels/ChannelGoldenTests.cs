@@ -6,6 +6,7 @@ using Campfire.Application.Rooms;
 using Campfire.Application.Users;
 using Campfire.IntegrationTests.Support;
 using Campfire.Web.Tests.Cable.Support;
+using Campfire.Web.Workers;
 using Microsoft.Data.Sqlite;
 
 namespace Campfire.IntegrationTests.Channels;
@@ -156,12 +157,28 @@ public sealed class ChannelGoldenTests
             var frames = step["frames"]!.AsObject( ).ToDictionary(
                 socket => socket.Key,
                 socket => socket.Value!.AsArray( )
-                    .Select( frame => ReplaceRecordedStreamTokens( frame!.GetValue<string>( ), recordedTokens, nativeTokens ) )
+                    .Select( frame => CurrentRoomNotice( ReplaceRecordedStreamTokens( frame!.GetValue<string>( ), recordedTokens, nativeTokens ) ) )
                     .Order( StringComparer.Ordinal )
                     .ToList( ),
                 StringComparer.Ordinal );
 
             return new Exchange( name, frames );
+        }
+
+        // The historical vector stays intact. Current Rails adds numeric seconds to room notices.
+        private static string CurrentRoomNotice( string frame )
+        {
+            if ( frame.Contains( "\"message\":{\"room_id\":", StringComparison.Ordinal ) )
+            {
+                return frame[..^2] + ",\"at\":1790428492}}";
+            }
+
+            if ( frame.Contains( "\"message\":{\"roomId\":", StringComparison.Ordinal ) )
+            {
+                return frame[..^2] + ",\"at\":1790428155.920972}}";
+            }
+
+            return frame;
         }
 
         /// <summary>The number of frames <paramref name="socket"/> received in this step.</summary>
@@ -253,13 +270,10 @@ public sealed class ChannelGoldenTests
             return _sockets[socket].SendAsync( frame );
         }
 
-        /// <summary><c>Message#broadcast_unread_room</c>: <c>{ roomId: }</c> to every member's unread stream.</summary>
-        public async Task UnreadFanoutAsync( )
-        {
-            var roomId = Message["room_id"]!.GetValue<long>( );
-            var members = await factory.App.Database.ReadAsync( db => MembershipQueries.UserIdsInRoom( db, roomId ), CancellationToken.None );
-            factory.App.Broadcasts.UnreadRoom( roomId, members );
-        }
+        /// <summary>Runs the current unread-room handler against the recorded message and current memberships.</summary>
+        public Task UnreadFanoutAsync( ) =>
+            new BroadcastUnreadRoomHandler( factory.App ).PerformAsync(
+                new BroadcastUnreadRoomJob( Message["id"]!.GetValue<long>( ) ), TestContext.Current.CancellationToken );
 
         /// <summary><c>Message#broadcast_remove</c>.</summary>
         public async Task RemoveMessageAsync( )

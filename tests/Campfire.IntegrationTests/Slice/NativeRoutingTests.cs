@@ -162,6 +162,7 @@ public sealed class NativeRoutingTests
         Assert.Equal( 1, factory.Scalar<long>( $"SELECT COUNT(*) FROM rooms WHERE id={room}" ) );
         var deleted = await administrator.SubmitFormAsync( HttpMethod.Delete, Routes.Room( room ), administratorToken );
         Assert.Equal( HttpStatusCode.Found, deleted.Status );
+        await SliceWait.UntilAsync( ( ) => factory.Scalar<long>( $"SELECT COUNT(*) FROM rooms WHERE id={room}" ) == 0 );
         Assert.Equal( 0, factory.Scalar<long>( $"SELECT COUNT(*) FROM rooms WHERE id={room}" ) );
     }
 }

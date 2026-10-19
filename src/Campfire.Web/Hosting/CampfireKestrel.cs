@@ -42,7 +42,7 @@ namespace Campfire.Web.Hosting;
 /// <description>Puma: 30 s <c>first_data_timeout</c>. Kestrel: 30 s <c>RequestHeadersTimeout</c>, unchanged.</description>
 /// </item>
 /// </list>
-/// Kestrel writes <c>Date</c> from the real clock, which stays so (plan lesson 10); the registered
+/// Kestrel writes <c>Date</c> from the real clock. The registered
 /// <see cref="TimeProvider"/> doesn't affect it.
 /// </summary>
 public static class CampfireKestrel

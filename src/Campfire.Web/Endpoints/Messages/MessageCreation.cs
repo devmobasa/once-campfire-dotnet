@@ -1,5 +1,4 @@
 using Campfire.Application.Bots;
-using Campfire.Application.Memberships;
 using Campfire.Application.Messages;
 using Campfire.Application.RichText;
 using Campfire.Application.Rooms;
@@ -8,6 +7,7 @@ using Campfire.Web.App;
 using Campfire.Web.Http;
 using Campfire.Web.Presenters;
 using Campfire.Web.Views.Helpers;
+using Campfire.Web.Workers;
 
 namespace Campfire.Web.Endpoints.Messages;
 
@@ -15,12 +15,11 @@ namespace Campfire.Web.Endpoints.Messages;
 /// <c>MessagesController#create</c>'s sequence, shared with the bot API:
 /// <list type="number">
 /// <item>Before any lease: the upload is staged (copied, checksummed, identified) and the body canonicalized.</item>
-/// <item>One write transaction: the message, its body, the blob and attachment rows, the touches. After commit, in
-/// order: the search index insert, the file's upload (the staged file renamed into place), <c>room.receive</c>
-/// (unread memberships, the push job), the analysis job.</item>
+/// <item>One write transaction: the message, body, blob and attachment rows, touches, search index and unread memberships.
+/// After commit: publish the staged file, queue push delivery, then queue analysis.</item>
 /// <item><c>process_attachment</c>: analysis (outside the lease; its rows in a short transaction), then the
 /// <c>:thumb</c> variant or the video's WebP preview.</item>
-/// <item><c>broadcast_create</c>: the message appended to the room's stream, then <c>{ roomId: }</c> to each member.</item>
+/// <item><c>broadcast_create</c>: append the message, then queue timestamped notices for unread or connected members.</item>
 /// <item>Webhook jobs for the eligible bots.</item>
 /// </list>
 /// Once the transaction commits, nothing below it takes the request's token: a client that goes away doesn't cancel
@@ -160,8 +159,8 @@ public static class MessageCreation
 
     /// <summary>
     /// <c>Message#broadcast_create</c>: the message as <c>ApplicationController.render</c> renders it (no request, the
-    /// request's protocol and host without its port) appended to <c>[ room, :messages ]</c>, then the unread pings to
-    /// every member. Returns the <c>&lt;turbo-stream&gt;</c> sent.
+    /// request's protocol and host including its port) appended to <c>[ room, :messages ]</c>, then unread notification work.
+    /// Returns the <c>&lt;turbo-stream&gt;</c> sent.
     /// </summary>
     private static async Task<byte[]> BroadcastCreateAsync(
         CampfireApp app,
@@ -172,7 +171,7 @@ public static class MessageCreation
         var (room, message, baseUrl, requestHost, created) = broadcast;
         var cache = views.CaptureBroadcastCache( baseUrl );
         var ffmpeg = await app.Storage.Tools.FfmpegExistsAsync( );
-        var (broadcastContext, item, members) = await app.Database.ReadAsync( db =>
+        var (broadcastContext, item) = await app.Database.ReadAsync( db =>
         {
             var broadcastContext = views.ForBroadcast( db, baseUrl, cache );
             var presenter = new MessagePresenter( app, db, requestHost, ffmpeg );
@@ -182,10 +181,12 @@ public static class MessageCreation
             }
 
             var item = presenter.Item( broadcastContext, message );
-            return (broadcastContext, item, MembershipQueries.UserIdsInRoom( db, room.Id ));
+            return (broadcastContext, item);
         }, cancellationToken );
 
-        return await app.Broadcasts.MessageCreatedAsync( room, broadcastContext, item, members, cancellationToken );
+        var html = await app.Broadcasts.MessageCreatedAsync( room, broadcastContext, item, cancellationToken );
+        app.Jobs.BroadcastUnreadRoom.Enqueue( new BroadcastUnreadRoomJob( message.Id ) );
+        return html;
     }
 
     /// <summary>
@@ -207,7 +208,7 @@ public static class MessageCreation
         var created = await CreateMessageAsync( app, source, requestHost: null, cancellationToken );
         var committed = CancellationToken.None;
         await ProcessAttachmentAsync( app, created, committed );
-        var broadcast = new MessageBroadcast( room, created.Message, ViewContexts.DetachedBaseUrl, RequestHost: null, Created: null );
+        var broadcast = new MessageBroadcast( room, created.Message, app.Options.PublicOrigin ?? ViewContexts.DetachedBaseUrl, RequestHost: null, Created: null );
         await BroadcastCreateAsync( app, views, broadcast, committed );
         return created.Message;
     }

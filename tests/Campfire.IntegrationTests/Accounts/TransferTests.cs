@@ -1,4 +1,5 @@
 using System.Net;
+using AngleSharp.Html.Parser;
 using Campfire.Application.Security;
 using Campfire.IntegrationTests.Support;
 using Campfire.Web.Paths;
@@ -13,6 +14,22 @@ namespace Campfire.IntegrationTests.Accounts;
 public sealed class TransferTests
 {
     private static readonly long Kevin = SliceAppFactory.Id( "kevin" );
+
+    [Fact]
+    public async Task A_signed_out_transfer_get_renders_one_complete_auto_submit_form( )
+    {
+        using var factory = new SliceAppFactory( );
+        using var client = factory.Client( );
+
+        var page = await client.GetAsync( Routes.SessionTransfer( "some-token" ) );
+
+        Assert.Equal( HttpStatusCode.OK, page.Status );
+        var document = new HtmlParser( ).ParseDocument( page.Body );
+        var form = Assert.Single( document.QuerySelectorAll( "form[data-controller='auto-submit']" ) );
+        Assert.Single( form.QuerySelectorAll( "input[name='_method'][value='put']" ) );
+        Assert.Equal( page.Body.Split( "<form ", StringSplitOptions.None ).Length - 1, page.Body.Split( "</form>", StringSplitOptions.None ).Length - 1 );
+        Assert.Matches( """<form\b[^>]*data-controller="auto-submit"[^>]*>(?:\s*<input\b[^>]*>)*\s*</form>""", page.Body );
+    }
 
     [Fact]
     public async Task The_link_page_puts_back_to_itself_and_the_put_signs_in( )

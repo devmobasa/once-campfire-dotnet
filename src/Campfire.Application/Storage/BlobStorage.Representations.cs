@@ -101,9 +101,16 @@ public sealed partial class BlobStorage
     /// </summary>
     public async Task<Blob> ProcessVariantAsync( Blob blob, Variation variation, CancellationToken cancellationToken )
     {
+        _variantFlights.ThrowIfDisposed( );
         if ( await ExistingVariantAsync( blob, variation, cancellationToken ) is { } existing )
         {
             return existing;
+        }
+
+        using var flight = await _variantFlights.EnterAsync( blob.Id, variation.Digest( ), cancellationToken );
+        if ( await ExistingVariantAsync( blob, variation, cancellationToken ) is { } recordedEarlier )
+        {
+            return recordedEarlier;
         }
 
         using var staged = await TransformVariantAsync( blob, variation, cancellationToken );

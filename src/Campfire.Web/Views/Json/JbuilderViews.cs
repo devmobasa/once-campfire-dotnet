@@ -43,7 +43,7 @@ public sealed record AutocompletableUserJson( string Name, long Value, string Av
 
 /// <summary>
 /// A Jbuilder partial whose body is <c>json.cache! record do ... end</c>, on its way into a view: with a key, the
-/// store is consulted first and <see cref="Build"/> runs only on a miss (plan lesson 3); without one it renders
+/// store is checked first. <see cref="Build"/> runs only on a miss. Without a store, it renders
 /// uncached (<c>perform_caching = false</c>).
 /// </summary>
 /// <typeparam name="T">The partial's value.</typeparam>

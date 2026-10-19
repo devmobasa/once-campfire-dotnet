@@ -35,9 +35,9 @@ internal static class MessageBodyRows
 
     /// <summary>
     /// <c>message.body = body</c>, saved: the row is created when the message has none, rewritten (touching the message)
-    /// when its body changed, and left alone otherwise.
+    /// when its body changed, and left alone otherwise. Returns whether the row was saved.
     /// </summary>
-    public static void Update( WriteScope scope, Message message, string? body )
+    public static bool Update( WriteScope scope, Message message, string? body )
     {
         var richText = scope.Db.Connection.QuerySingleOrDefault<ActionTextRichText>(
             $"SELECT {Columns.RichTexts} FROM action_text_rich_texts WHERE {MessageBodies.WhereBodyOfMessage}",
@@ -51,12 +51,12 @@ internal static class MessageBodyRows
         if ( richText is null )
         {
             Insert( scope, message, body );
-            return;
+            return true;
         }
 
         if ( richText.Body == body )
         {
-            return;
+            return false;
         }
 
         var key = RecordKeys.RichText( richText.Id );
@@ -68,6 +68,7 @@ internal static class MessageBodyRows
             key );
         scope.Enlist( key );
         MessageOperations.TouchLaterWithoutReindex( scope, message );
+        return true;
     }
 
     /// <summary>Deletes the message's body row, as <c>message.destroy</c> destroys its <c>rich_text_body</c>.</summary>

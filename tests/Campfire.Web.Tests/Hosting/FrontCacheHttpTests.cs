@@ -7,6 +7,33 @@ namespace Campfire.Web.Tests.Hosting;
 public sealed class FrontCacheHttpTests
 {
     [Theory]
+    [InlineData( "/users/1/avatar", "image/png" )]
+    [InlineData( "/assets/application.css", "text/css" )]
+    public async Task Public_hits_accept_browser_session_cookies_without_reentering_the_app( string path, string contentType )
+    {
+        var calls = 0;
+        await using var server = await FrontTestServer.StartAsync( false, context =>
+        {
+            Interlocked.Increment( ref calls );
+            context.Response.ContentType = contentType;
+            context.Response.Headers.CacheControl = "public,max-age=300";
+            return context.Response.WriteAsync( "public bytes", context.RequestAborted );
+        } );
+        using var client = server.Client( );
+        for ( var attempt = 0; attempt < 2; attempt++ )
+        {
+            using var request = new HttpRequestMessage( HttpMethod.Get, path );
+            request.Headers.Add( "Cookie", "session_token=opaque-browser-ticket" );
+            using var response = await client.SendAsync( request, TestContext.Current.CancellationToken );
+            Assert.Equal( HttpStatusCode.OK, response.StatusCode );
+            Assert.Equal( attempt == 0 ? "miss" : "hit", response.Headers.GetValues( "X-Cache" ).Single( ) );
+            Assert.Equal( "public bytes", await response.Content.ReadAsStringAsync( TestContext.Current.CancellationToken ) );
+        }
+
+        Assert.Equal( 1, Volatile.Read( ref calls ) );
+    }
+
+    [Theory]
     [InlineData( "gzip", true )]
     [InlineData( "gzip,deflate,br", true )]
     [InlineData( "gzip,identity;q=0", false )]

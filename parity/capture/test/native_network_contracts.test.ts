@@ -45,7 +45,7 @@ test("approved Rails session reissuance is omitted only for ordinary issued secu
 
 test("native auth retains sign-in issuance and checks its absolute thirty-day lifetime and attributes", () => {
   const options = { request: "POST /session", status: 302, cookies: [`session_token; ${cookieAttrs}`] }
-  const receipt = raw({ request: options.request, status: 302, cookies: [`.Campfire.Auth=opaque; path=/; httponly; samesite=lax; expires=${expires}`] })
+  const receipt = raw({ request: options.request, status: 302, cookies: [`session_token=opaque; path=/; httponly; samesite=lax; expires=${expires}`] })
   equal(pair(text(options), text(options), { actualReceipts: [receipt] }))
   for (const mutation of ["Wed, 04 Nov 2026 12:00:00 GMT", "Fri, 06 Nov 2026 12:00:00 GMT", "not-a-date"]) {
     const bad = structuredClone(receipt); bad.cookies[0].attributes.expires = mutation
@@ -150,10 +150,10 @@ test("navigation body duplication is removed only by the independently matching 
 })
 
 test("raw cookie attribute receipts exclude values and reject malformed duplicates", () => {
-  const receipt = cookieContractReceipt(".Campfire.Auth=secret; Path=/; HttpOnly; SameSite=Lax")
+  const receipt = cookieContractReceipt("session_token=secret; Path=/; HttpOnly; SameSite=Lax")
   assert.equal(JSON.stringify(receipt).includes("secret"), false)
   assert.equal(receipt.malformed, false)
-  assert.equal(cookieContractReceipt(".Campfire.Auth=secret; Path=/; Path=/other").malformed, true)
+  assert.equal(cookieContractReceipt("session_token=secret; Path=/; Path=/other").malformed, true)
 })
 
 test("every native response needs its own exact unique security receipt; an unrelated receipt proves nothing", () => {
@@ -178,12 +178,12 @@ test("the shared raw verifier rejects identical malformed native/control cookies
   }
   assert.ok(verifyNativeContractReceipts(text(options), []).length)
   assert.ok(verifyNativeContractReceipts(text(options), [valid, valid]).length)
-  const cleared = raw({ cookies: [".Campfire.Auth=; httponly; path=/; samesite=lax; expires=Thu, 01 Jan 1970 00:00:00 GMT"] })
+  const cleared = raw({ cookies: ["session_token=; httponly; path=/; samesite=lax; expires=Thu, 01 Jan 1970 00:00:00 GMT"] })
   assert.deepEqual(verifyNativeContractReceipts(text({ cookies: [`session_token (cleared); ${cookieAttrs}`] }), [cleared]), [])
 })
 
 test("fresh pairs validate cleared native cookies before matching identical cleared shapes", () => {
-  for (const [name, alias] of [[".Campfire.Auth", "session_token"], [".Campfire.Csrf", "_campfire_session"], ["last_room", "last_room"], [".Campfire.Flash", ".Campfire.Flash"]]) {
+  for (const [name, alias] of [["session_token", "session_token"], [".Campfire.Csrf", "_campfire_session"], ["last_room", "last_room"], [".Campfire.Flash", ".Campfire.Flash"]]) {
     const actual = text({ cookies: [`${alias} (cleared); ${cookieAttrs}`] })
     const clear = raw({ cookies: [`${name}=; httponly; path=/; samesite=lax; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0`] })
     equal(pair(actual, actual, { actualReceipts: [clear] }))
@@ -225,7 +225,7 @@ test("deduplicated original blocks retain and validate every raw policy variant"
   assert.ok(pair(actual, differentStatus, { actualReceipts: [first, second] }).unproven.some(value => value.rule.includes("per-response")))
 
   const authText = text({ request: "POST /session", status: 302, cookies: [`session_token; ${cookieAttrs}`] })
-  const auth = { ...raw({ request: "POST /session", status: 302, cookies: [`.Campfire.Auth=one; httponly; path=/; samesite=lax; expires=${expires}`] }), originalBlock: authText.trimEnd() }
+  const auth = { ...raw({ request: "POST /session", status: 302, cookies: [`session_token=one; httponly; path=/; samesite=lax; expires=${expires}`] }), originalBlock: authText.trimEnd() }
   const later = structuredClone(auth); later.headers.date = "Tue, 06 Oct 2026 12:00:01 GMT"; later.cookies[0].attributes.expires = "Thu, 05 Nov 2026 12:00:01 GMT"
   equal(pair(authText, authText, { actualReceipts: [auth, later] }))
   later.cookies[0].attributes.expires = "Fri, 06 Nov 2026 12:00:01 GMT"

@@ -78,6 +78,9 @@ const { values: opts, positionals } = parseArgs({
     "auth-cookie": { type: "string", default: "session_token" },
     "expected-auth-cookie": { type: "string", default: "session_token" },
     "actual-auth-cookie": { type: "string", default: "session_token" },
+    "native-target": { type: "boolean", default: false },
+    "expected-native-target": { type: "boolean", default: false },
+    "actual-native-target": { type: "boolean", default: false },
     "no-allowlist": { type: "boolean", default: false },
     report: { type: "string", default: "report" },
     diagnostics: { type: "boolean", default: false },
@@ -175,7 +178,7 @@ async function main() {
     case "capture": {
       if (!opts.target) fail("capture needs --target URL")
       const dir = outDir("capture")
-      const result = await run({ ...common(), targets: [{ name: opts.name ?? "capture", url: opts.target!, origin: opts.origin!, authCookieName: opts["auth-cookie"] }], outDir: dir, reset: resetHook() })
+      const result = await run({ ...common(), targets: [{ name: opts.name ?? "capture", url: opts.target!, origin: opts.origin!, authCookieName: opts["auth-cookie"], nativeTarget: opts["native-target"] }], outDir: dir, reset: resetHook() })
       console.log(`artifacts: ${path.join(dir, opts.name ?? "capture")}`)
       return finish(result)
     }
@@ -184,8 +187,8 @@ async function main() {
       const result = await run({
         ...common(),
         targets: [
-          { name: opts["expected-name"]!, url: opts.expected!, origin: opts.origin!, authCookieName: opts["expected-auth-cookie"] },
-          { name: opts["actual-name"]!, url: opts.actual!, origin: opts.origin!, authCookieName: opts["actual-auth-cookie"] },
+          { name: opts["expected-name"]!, url: opts.expected!, origin: opts.origin!, authCookieName: opts["expected-auth-cookie"], nativeTarget: opts["expected-native-target"] },
+          { name: opts["actual-name"]!, url: opts.actual!, origin: opts.origin!, authCookieName: opts["actual-auth-cookie"], nativeTarget: opts["actual-native-target"] },
         ],
         outDir: outDir("compare"),
         allowlist: loadAllowlist(),

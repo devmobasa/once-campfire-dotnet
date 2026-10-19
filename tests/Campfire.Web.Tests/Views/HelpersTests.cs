@@ -3,7 +3,6 @@ using Campfire.Web.Tests.Views.Support;
 using Campfire.Web.Views;
 using Campfire.Web.Views.Helpers;
 using Campfire.Web.Views.Models;
-using Campfire.Web.Views.Rendering;
 
 namespace Campfire.Web.Tests.Views;
 
@@ -12,16 +11,6 @@ public sealed class HelpersTests
 {
     [Fact]
     public void Escapes_like_erb_util( ) => Assert.Equal( "&lt;&amp;&gt;&quot;&#39;x é 🎉", Escaping.Escape( "<&>\"'x é 🎉" ) );
-
-    [Fact]
-    public void The_encoder_escapes_like_erb_util( )
-    {
-        var writer = new StringWriter( );
-
-        RailsHtmlEncoder.Instance.Encode( writer, "<b>é ü 🎉 &nbsp; \"q\" 'a'</b>" );
-
-        Assert.Equal( "&lt;b&gt;é ü 🎉 &amp;nbsp; &quot;q&quot; &#39;a&#39;&lt;/b&gt;", writer.ToString( ) );
-    }
 
     [Fact]
     public void Renders_attributes_in_order_with_rails_value_rules( )

@@ -1,12 +1,9 @@
-using Campfire.Application.Bots;
 using Campfire.Application.Data;
 using Campfire.Application.Data.Records;
 using Campfire.Application.Memberships;
 using Campfire.Application.Messages;
 using Campfire.Application.Rooms;
 using Campfire.Application.Tests.Support;
-
-using Microsoft.Data.Sqlite;
 
 namespace Campfire.Application.Tests.Messages;
 
@@ -79,19 +76,27 @@ public sealed class MessageSequenceTests
     }
 
     [Fact]
-    public async Task Creating_a_message_runs_index_upload_receive_then_analysis_after_commit( )
+    public async Task Attachment_upload_observes_committed_index_unread_and_touches( )
     {
         using var testDatabase = await TestDatabase.CreateAsync( );
         using var side = testDatabase.OpenSideConnection( );
         await testDatabase.WriteAsync( scope => MembershipPresence.Connected( scope, TestDatabase.Id( "jz_designers" ) ) );
         string? indexedAtUpload = null;
         object? unreadAtUpload = null;
+        object? createdAtUpload = null;
+        object? committedRowsAtUpload = null;
         testDatabase.Hooks.Intercept = line =>
         {
             if ( line.StartsWith( "upload", StringComparison.Ordinal ) )
             {
                 indexedAtUpload = ( string? ) Sql.Scalar( side, "SELECT body FROM message_search_index" );
                 unreadAtUpload = Sql.Scalar( side, $"SELECT unread_at FROM memberships WHERE id = {TestDatabase.Id( "jason_designers" )}" );
+                createdAtUpload = Sql.Scalar( side, "SELECT created_at FROM messages WHERE client_message_id='abc'" );
+                committedRowsAtUpload = Sql.Scalar( side, """
+                    SELECT count(*) FROM messages m JOIN rooms r ON r.id=m.room_id
+                    JOIN active_storage_attachments a ON a.record_type='Message' AND a.record_id=m.id
+                    WHERE m.client_message_id='abc' AND r.updated_at>=m.updated_at
+                    """ );
             }
         };
 
@@ -102,7 +107,9 @@ public sealed class MessageSequenceTests
             [$"upload blob {blobId} from moon.jpg", $"push room {TestDatabase.Id( "designers" )} message {created.Message.Id}", $"analyze blob {blobId}"],
             testDatabase.Hooks.Events );
         Assert.Equal( "Hello there", indexedAtUpload );
-        Assert.Equal( DBNull.Value, unreadAtUpload );
+        Assert.NotNull( createdAtUpload );
+        Assert.Equal( createdAtUpload, unreadAtUpload );
+        Assert.Equal( 1L, committedRowsAtUpload );
     }
 
     [Fact]
@@ -125,6 +132,32 @@ public sealed class MessageSequenceTests
         var body = await testDatabase.ReadAsync( db => MessageBodies.Body( db, message.Id ) );
         var recordType = await testDatabase.ScalarAsync<string>( "SELECT record_type FROM action_text_rich_texts WHERE record_id = @p0", message.Id );
         Assert.Equal( ("Hello <b>there</b>", "Message"), (body, recordType) );
+    }
+
+    [Theory]
+    [InlineData( "designers", "david", "jason_designers", false )]
+    [InlineData( "bender_and_kevin", "kevin", "bender_bender_and_kevin", true )]
+    public async Task Only_direct_rooms_refresh_an_already_unread_membership( string room, string creator, string membership, bool direct )
+    {
+        using var testDatabase = await TestDatabase.CreateAsync( );
+        var attributes = InDesigners( ) with { RoomId = TestDatabase.Id( room ), CreatorId = TestDatabase.Id( creator ) };
+        var first = await testDatabase.WriteAsync( scope => MessageOperations.Create( scope, attributes ) );
+        var before = await testDatabase.ReadAsync( db => MembershipQueries.Find( db, TestDatabase.Id( membership ) ) );
+        testDatabase.Clock.Travel( TimeSpan.FromSeconds( 1 ) );
+
+        var second = await testDatabase.WriteAsync( scope => MessageOperations.Create( scope, attributes ) );
+        var after = await testDatabase.ReadAsync( db => MembershipQueries.Find( db, before.Id ) );
+
+        Assert.Equal( first.Message.CreatedAt, before.UnreadAt );
+        Assert.Equal( direct ? second.Message.CreatedAt : before.UnreadAt, after.UnreadAt );
+        if ( direct )
+        {
+            Assert.True( after.UpdatedAt > before.UpdatedAt );
+        }
+        else
+        {
+            Assert.Equal( before.UpdatedAt, after.UpdatedAt );
+        }
     }
 
     [Fact]
@@ -151,54 +184,6 @@ public sealed class MessageSequenceTests
 
         Assert.Null( (await testDatabase.ReadAsync( db => MembershipQueries.Find( db, TestDatabase.Id( "kevin_designers" ) ) )).UnreadAt );
         Assert.NotNull( (await testDatabase.ReadAsync( db => MembershipQueries.Find( db, TestDatabase.Id( "jason_designers" ) ) )).UnreadAt );
-    }
-
-    [Fact]
-    public async Task A_failed_index_insert_leaves_the_message_committed_and_runs_nothing_after_it( )
-    {
-        using var testDatabase = await TestDatabase.CreateAsync( );
-        using ( var side = testDatabase.OpenSideConnection( ) )
-        {
-            Sql.Execute( side, "DROP TABLE message_search_index" );
-        }
-
-        var error = await Assert.ThrowsAsync<AfterCommitFailedException>( ( ) => testDatabase.WriteAsync( scope => MessageOperations.Create(
-            scope,
-            InDesigners( attachment: Moon ) ) ) );
-
-        Assert.IsType<SqliteException>( error.InnerException );
-        Assert.Empty( testDatabase.Hooks.Events );
-        Assert.Equal( 14, await testDatabase.CountAsync( "messages" ) );
-        Assert.Equal( 1, await testDatabase.CountAsync( "active_storage_blobs" ) );
-        Assert.Null( (await testDatabase.ReadAsync( db => MembershipQueries.Find( db, TestDatabase.Id( "jason_designers" ) ) )).UnreadAt );
-    }
-
-    [Fact]
-    public async Task A_failed_attachment_processing_keeps_the_after_commit_work_and_sends_no_webhooks( )
-    {
-        using var testDatabase = await TestDatabase.CreateAsync( );
-        var toBender = new NewMessage { RoomId = TestDatabase.Id( "bender_and_kevin" ), CreatorId = TestDatabase.Id( "kevin" ), Attachment = Moon };
-
-        await Assert.ThrowsAsync<InvalidOperationException>( ( ) => CreateAsTheControllerDoes( testDatabase, toBender, processingFails: true ) );
-
-        Assert.Equal( 3, testDatabase.Hooks.Events.Count );
-        Assert.StartsWith( "upload", testDatabase.Hooks.Events[0], StringComparison.Ordinal );
-        Assert.StartsWith( "push", testDatabase.Hooks.Events[1], StringComparison.Ordinal );
-        Assert.StartsWith( "analyze", testDatabase.Hooks.Events[2], StringComparison.Ordinal );
-        Assert.DoesNotContain(
-            testDatabase.Hooks.Events,
-            line => line.StartsWith( "broadcast", StringComparison.Ordinal ) || line.StartsWith( "webhook", StringComparison.Ordinal ) );
-    }
-
-    [Fact]
-    public async Task Without_a_processing_failure_the_bot_in_a_direct_room_gets_its_webhook( )
-    {
-        using var testDatabase = await TestDatabase.CreateAsync( );
-        var toBender = new NewMessage { RoomId = TestDatabase.Id( "bender_and_kevin" ), CreatorId = TestDatabase.Id( "kevin" ), Attachment = Moon };
-
-        var message = await CreateAsTheControllerDoes( testDatabase, toBender, processingFails: false );
-
-        Assert.Equal( $"webhook bot {TestDatabase.Id( "bender" )} message {message.Id}", testDatabase.Hooks.Events[^1] );
     }
 
     [Fact]
@@ -296,8 +281,26 @@ public sealed class MessageSequenceTests
         Assert.Equal( "earth.png", blob.Filename );
     }
 
+    [Theory]
+    [InlineData( "body" )]
+    [InlineData( "client" )]
+    [InlineData( "empty" )]
+    public async Task Saving_without_changed_indexed_text_leaves_the_index_alone( string assignment )
+    {
+        using var testDatabase = await TestDatabase.CreateAsync( );
+        var message = (await testDatabase.WriteAsync( scope => MessageOperations.Create( scope, InDesigners( "cats" ) ) )).Message;
+        await testDatabase.ExecuteAsync( "UPDATE message_search_index SET body = 'stale' WHERE rowid = @p0", message.Id );
+
+        await testDatabase.WriteAsync( scope => MessageOperations.Update(
+            scope, message.Id,
+            assignment == "body" ? new Assigned<string?>( "cats" ) : default,
+            assignment == "client" ? new Assigned<string>( "renamed" ) : default ) );
+
+        Assert.Equal( "stale", await testDatabase.ReadAsync( db => MessageSearchIndex.IndexedBody( db, message.Id ) ) );
+    }
+
     [Fact]
-    public async Task Boosting_defers_the_message_touch_and_reindexes_after_commit( )
+    public async Task Boosting_touches_the_message_and_room_without_reindexing( )
     {
         using var testDatabase = await TestDatabase.CreateAsync( );
         var message = (await testDatabase.WriteAsync( scope => MessageOperations.Create( scope, InDesigners( "cats" ) ) )).Message;
@@ -312,11 +315,12 @@ public sealed class MessageSequenceTests
         var touched = await testDatabase.ReadAsync( db => MessageQueries.Find( db, message.Id ) );
         Assert.True( touched.UpdatedAt > message.UpdatedAt );
         Assert.True( (await testDatabase.ReadAsync( db => RoomQueries.FindById( db, message.RoomId )! )).UpdatedAt >= touched.UpdatedAt );
-        Assert.Equal( "cats", await testDatabase.ReadAsync( db => MessageSearchIndex.IndexedBody( db, message.Id ) ) );
+        Assert.Equal( "stale", await testDatabase.ReadAsync( db => MessageSearchIndex.IndexedBody( db, message.Id ) ) );
 
         testDatabase.Clock.Travel( TimeSpan.FromSeconds( 1 ) );
         await testDatabase.WriteAsync( scope => BoostOperations.Destroy( scope, boost.Id ) );
         Assert.True( (await testDatabase.ReadAsync( db => MessageQueries.Find( db, message.Id ) )).UpdatedAt > touched.UpdatedAt );
+        Assert.Equal( "stale", await testDatabase.ReadAsync( db => MessageSearchIndex.IndexedBody( db, message.Id ) ) );
     }
 
     [Fact]
@@ -330,26 +334,5 @@ public sealed class MessageSequenceTests
 
         Assert.Null( await testDatabase.ReadAsync( db => MessageSearchIndex.IndexedBody( db, first.Id ) ) );
         Assert.True( (await testDatabase.ReadAsync( db => MessageQueries.Find( db, first.Id ) )).UpdatedAt > first.UpdatedAt );
-    }
-
-    /// <summary>
-    /// <c>MessagesController#create</c>: <c>create_with_attachment!</c> is <c>create!</c> then
-    /// <c>process_attachment</c>; then <c>broadcast_create</c>; then the bots' webhooks.
-    /// </summary>
-    private static async Task<Message> CreateAsTheControllerDoes( TestDatabase testDatabase, NewMessage attributes, bool processingFails )
-    {
-        var created = await testDatabase.WriteAsync( scope => MessageOperations.Create( scope, attributes ) );
-        if ( processingFails )
-        {
-            throw new InvalidOperationException( "libvips could not read the file" );
-        }
-
-        var room = await testDatabase.ReadAsync( db => RoomQueries.FindById( db, attributes.RoomId )! );
-        await testDatabase.ReadAsync( db =>
-        {
-            BotOperations.DeliverWebhooksToBots( db, testDatabase.Database.Hooks, created.Message, room );
-            return true;
-        } );
-        return created.Message;
     }
 }

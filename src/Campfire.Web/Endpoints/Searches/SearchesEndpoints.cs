@@ -16,16 +16,14 @@ namespace Campfire.Web.Endpoints.Searches;
 /// <see cref="MessageSearch"/>.
 /// </summary>
 /// <remarks>
-/// <c>before_action :set_messages</c> runs for every action, <c>create</c> and <c>clear</c> included, so a query FTS5
-/// cannot parse (<c>?q=NOT</c>) answers 500 before anything is written, retaining the pinned Rails behavior
-/// documented in docs/compatibility.md#deliberate-differences-and-bounds. A non-string <c>q</c> raises <c>NoMethodError</c> in
-/// <c>gsub</c>: 500 too.
+/// <c>before_action :set_messages</c> runs for every action, <c>create</c> and <c>clear</c> included. Each search word
+/// becomes a literal FTS5 term. A non-string <c>q</c> raises <c>NoMethodError</c> in <c>gsub</c>: 500.
 /// </remarks>
 public static partial class SearchesEndpoints
 {
     /// <summary>
-    /// <c>set_messages</c>: <c>Current.user.reachable_messages.search(query).last(100)</c> when the sanitized query is
-    /// present, else <c>Message.none</c>. FTS5's syntax errors propagate (500).
+    /// <c>set_messages</c>: <c>Message.search_reachable(user, query)</c> when the sanitized query is
+    /// present, else <c>Message.none</c>.
     /// </summary>
     private static async ValueTask<FrontendResult?> SetMessagesAsync( RequestContext requestContext )
     {

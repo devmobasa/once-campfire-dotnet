@@ -8,17 +8,15 @@ using Dapper;
 namespace Campfire.Application.Messages;
 
 /// <summary>
-/// Writes to <c>messages</c> (<c>app/models/message.rb</c>). Text creation commits indexing and unread changes
-/// atomically. Attachment operations retain their established transaction and after-commit ordering.
+/// Writes to <c>messages</c> (<c>app/models/message.rb</c>). Creation commits rows, indexing, and unread changes
+/// atomically. Uploads and job delivery run after commit.
 /// </summary>
 public static class MessageOperations
 {
     /// <summary>
-    /// <c>Message</c>'s commit callbacks in definition order: <c>include Attachment, …, Searchable</c> sets up
-    /// <c>Searchable</c> first, then <c>has_one_attached</c>'s upload; <c>room.receive</c> is in the class body.
+    /// Callback priorities preserve index updates and removals before uploads, followed by push jobs.
+    /// Creation indexing and unread changes run inside the transaction instead.
     /// </summary>
-    internal const int CreateInIndexOrder = 1;
-
     internal const int UpdateInIndexOrder = 2;
 
     internal const int RemoveFromIndexOrder = 3;
@@ -29,10 +27,8 @@ public static class MessageOperations
 
     /// <summary>
     /// <c>room.messages.create_with_attachment!(attributes)</c> without its in-request processing. In the transaction:
-    /// the message, its body, the blob and attachment rows, and the deferred message and room touches. After commit,
-    /// in order: 1. the search index insert; 2. the attachment upload; 3. <c>room.receive</c> (unread memberships,
-    /// then the push job); 4. the attachment's analysis job. Without an attachment, indexing and unread changes
-    /// run after deferred touches in the transaction, and the push job runs after commit.
+    /// the message, its body, blob and attachment rows, deferred message and room touches, then indexing and unread
+    /// changes. After commit, in order: the attachment upload, the push job, and the attachment's analysis job.
     /// </summary>
     public static CreatedMessage Create( WriteScope scope, NewMessage attributes )
     {
@@ -82,33 +78,29 @@ public static class MessageOperations
 
         var received = Snapshot( message );
         received.UpdatedAt = touchedAt;
-        if ( attributes.Attachment is null && attributes.AttachedBlob is null )
+        scope.BeforeCommitFinal( transaction =>
         {
-            scope.BeforeCommitFinal( transaction =>
-            {
-                MessageSearchIndex.Insert( transaction.Db, transaction.Hooks.BodyText, message.Id );
-                RoomOperations.ReceiveInTransaction( transaction, received );
-            } );
-            scope.AfterCommit(
-                key, ReceiveOrder, "push text message", context => context.Hooks.PushJobs.PushMessageLater( received.RoomId, received.Id ) );
-            return new CreatedMessage( received, null, null ) { CanonicalText = attributes.Body };
-        }
+            MessageSearchIndex.Insert( transaction.Db, transaction.Hooks.BodyText, message.Id );
+            RoomOperations.ReceiveInTransaction( transaction, received );
+        } );
 
-        scope.AfterCommit(
-            key, CreateInIndexOrder, "create_in_index", context => MessageSearchIndex.Insert( context.Db, context.Hooks.BodyText, message.Id ) );
         if ( attached is not null )
         {
             scope.AfterCommit( key, UploadAttachmentOrder, "upload attachment", context => context.Hooks.Uploads.Upload( attached.Upload ) );
         }
 
-        scope.AfterCommit( key, ReceiveOrder, "room.receive", context => RoomOperations.Receive( context, received ) );
-        return new CreatedMessage( received, attached?.Blob ?? existing?.Blob, attached?.Attachment ?? existing?.Attachment );
+        scope.AfterCommit(
+            key, ReceiveOrder, "push message", context => context.Hooks.PushJobs.PushMessageLater( received.RoomId, received.Id ) );
+        return new CreatedMessage( received, attached?.Blob ?? existing?.Blob, attached?.Attachment ?? existing?.Attachment )
+        {
+            CanonicalText = attributes.Attachment is null && attributes.AttachedBlob is null ? new Assigned<string?>( attributes.Body ) : default,
+        };
     }
 
     /// <summary>
     /// <c>message.update!(body:, client_message_id:, attachment:)</c>. A changed body updates the rich text row, which
-    /// touches the message and so its room; the search index follows after commit (<c>after_update_commit
-    /// :update_in_index</c>, which runs for every update, changed or not). A new attachment (the bot API's update)
+    /// touches the message and so its room. Changed bodies and attachment assignments update the search index after commit.
+    /// A new attachment (the bot API's update)
     /// replaces the old one: after commit, the upload follows the index update, then the old blob's purge and the new
     /// blob's analysis.
     /// </summary>
@@ -120,8 +112,6 @@ public static class MessageOperations
         var message = MessageQueries.Find( scope.Db, messageId );
         var key = RecordKeys.Message( message.Id );
         scope.Enlist( key );
-        scope.AfterCommit( key, UpdateInIndexOrder, "update_in_index", context => MessageSearchIndex.Update( context.Db, context.Hooks.BodyText, messageId ) );
-
         var columns = new ChangedColumns( TableNames.Messages );
         if ( clientMessageId.IsSet )
         {
@@ -135,20 +125,26 @@ public static class MessageOperations
             DataWrites.ExpectOneRow( scope.Db.Connection.Execute( columns.UpdateSql( ), message, scope.Db.Transaction ), key );
         }
 
-        if ( body.IsSet )
+        if ( body.IsSet && MessageBodyRows.Update( scope, message, body.Value ) )
         {
-            MessageBodyRows.Update( scope, message, body.Value );
+            ReindexAfterCommit( scope, messageId );
         }
 
         if ( attachment is not null )
         {
             var attached = AttachedOne.Attach( scope, new AttachmentOwner( Message.RecordType, message.Id ), Message.AttachmentName, attachment );
             TouchLaterWithoutReindex( scope, message );
+            ReindexAfterCommit( scope, messageId );
             scope.AfterCommit( key, UploadAttachmentOrder, "upload attachment", context => context.Hooks.Uploads.Upload( attached.Upload ) );
         }
 
         return Snapshot( message );
     }
+
+    /// <summary>Registers one search update after a body save or attachment assignment.</summary>
+    internal static void ReindexAfterCommit( WriteScope scope, long messageId ) =>
+        scope.AfterCommit( RecordKeys.Message( messageId ), UpdateInIndexOrder, "update_in_index",
+            context => MessageSearchIndex.Update( context.Db, context.Hooks.BodyText, messageId ) );
 
     /// <summary>
     /// <c>message.destroy</c>: the attachment row (its blob purged after commit), the boosts, and the body, in the order
@@ -164,6 +160,7 @@ public static class MessageOperations
         var key = RecordKeys.Message( message.Id );
         scope.Enlist( key );
 
+        CleanupOutbox.QueueIndex( scope, messageId, message.RoomId );
         AttachedOne.Remove( scope, new AttachmentOwner( Message.RecordType, message.Id ), Message.AttachmentName );
 
         db.Connection.Execute( "DELETE FROM boosts WHERE message_id = @messageId", new
@@ -178,24 +175,25 @@ public static class MessageOperations
         }, db.Transaction ), key );
         RoomOperations.TouchLater( scope, message.RoomId );
 
-        scope.AfterCommit( key, RemoveFromIndexOrder, "remove_from_index", context => MessageSearchIndex.Delete( context.Db, messageId ) );
+        scope.AfterCommit( key, RemoveFromIndexOrder, "remove_from_index", context =>
+        {
+            MessageSearchIndex.Delete( context.Db, messageId );
+            CleanupOutbox.IndexRemoved( context.Db, messageId );
+        } );
         return Snapshot( message );
     }
 
     /// <summary>
     /// A deferred touch from a boost or the body (<c>touch: true</c> through <c>touch_later</c>): the message, then its
-    /// room, just before commit; the touch makes the message's <c>after_update_commit :update_in_index</c> run.
+    /// room, just before commit. A touch alone leaves the search index unchanged.
     /// </summary>
     public static void TouchLater( WriteScope scope, Message message )
     {
         ArgumentNullException.ThrowIfNull( scope );
         ArgumentNullException.ThrowIfNull( message );
 
-        var key = RecordKeys.Message( message.Id );
-        var messageId = message.Id;
-        scope.Enlist( key );
+        scope.Enlist( RecordKeys.Message( message.Id ) );
         TouchLaterWithoutReindex( scope, message );
-        scope.AfterCommit( key, UpdateInIndexOrder, "update_in_index", context => MessageSearchIndex.Update( context.Db, context.Hooks.BodyText, messageId ) );
     }
 
     /// <summary>

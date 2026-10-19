@@ -8,6 +8,7 @@ using Campfire.Web.Http;
 using Campfire.Web.Paths;
 using Campfire.Web.Policy;
 using Campfire.Web.Presenters;
+using Campfire.Web.Security;
 using Campfire.Web.Views.Caching;
 using Campfire.Web.Views.Models;
 using Campfire.Web.Views.Rendering;
@@ -17,7 +18,7 @@ namespace Campfire.Web.Endpoints.Users;
 /// <summary>
 /// <c>Users::AvatarsController</c> (<c>app/controllers/users/avatars_controller.rb</c>): a user's avatar by its signed
 /// avatar token: the uploaded image's <c>:square</c> variant, the default bot avatar, or an SVG of the initials. It
-/// includes <c>ActiveStorage::Streaming</c>, so responses are live (plan lesson 12).
+/// includes <c>ActiveStorage::Streaming</c>, so responses are live.
 /// </summary>
 public static partial class AvatarsEndpoints
 {
@@ -65,7 +66,13 @@ public static partial class AvatarsEndpoints
     {
         var app = requestContext.App( );
         var now = app.Now;
-        if ( app.SignedIds.Verify( ModelNames.User, signedUserId, SignedIds.AvatarPurpose, now, out var expiresAt ) is not { } userId )
+        var verified = app.SignedIds.Verify( ModelNames.User, signedUserId, SignedIds.AvatarPurpose, now, out var expiresAt );
+        if ( verified is null )
+        {
+            verified = requestContext.HttpContext.RequestServices.GetRequiredService<RailsAvatarTokens>( ).Verify( signedUserId, now, out expiresAt );
+        }
+
+        if ( verified is not { } userId )
         {
             return requestContext.Head( StatusCodes.Status404NotFound );
         }

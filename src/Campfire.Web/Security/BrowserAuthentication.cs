@@ -19,7 +19,7 @@ public static class BrowserAuthentication
     public const string Scheme = "Campfire.Browser";
     public const string DefaultScheme = "Campfire.Credential";
     public const string SessionTokenClaim = "Campfire.SessionToken";
-    public const string CookieName = ".Campfire.Auth";
+    public const string CookieName = "session_token";
     public const string SignInPath = "/session/new";
     public const string ReturnUrlParameter = "returnUrl";
     public const int LifetimeDays = 30;

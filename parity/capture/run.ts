@@ -80,7 +80,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
   if (options.direct && !options.diagnostics) throw new Error("--direct is diagnostic-only and requires --diagnostics")
   const pool = new BrowserPool(options.diagnostics ? path.join(options.outDir, "diagnostics") : undefined)
   const sessions = new SessionCache()
-  const env: CaptureEnv = { pool, sessions, outDir: options.outDir, time: options.time, timeoutMs: options.timeoutMs, seedDir: options.seedDir, diagnostics: options.diagnostics, diagnosticNoHar: options.diagnosticNoHar, nativeComparison: options.targets.some((target) => target.authCookieName === ".Campfire.Auth"), nativeTokenResolver: options.nativeTokenResolver }
+  const env: CaptureEnv = { pool, sessions, outDir: options.outDir, time: options.time, timeoutMs: options.timeoutMs, seedDir: options.seedDir, diagnostics: options.diagnostics, diagnosticNoHar: options.diagnosticNoHar, nativeComparison: options.targets.some((target) => target.nativeTarget), nativeTokenResolver: options.nativeTokenResolver }
   fs.mkdirSync(options.outDir, { recursive: true })
   const slots = options.reset ? Math.max(1, options.isolatedSlots ?? DEFAULT_ISOLATED_SLOTS) : 0
   // isolated[k][i]: slot k's server standing in for options.targets[i]

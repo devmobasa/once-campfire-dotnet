@@ -36,7 +36,7 @@ public static class Pages
 
     /// <summary>
     /// <see cref="PageAsync"/> without the template lookup: an explicit <c>render template:</c> answers HTML whatever
-    /// the request's format (the incompatible-browser page, plan lesson 11).
+    /// the request's format, including the incompatible-browser page.
     /// </summary>
     public static async Task<FrontendResult> RenderPageAsync(
         RequestContext requestContext,

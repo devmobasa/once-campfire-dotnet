@@ -14,7 +14,7 @@ namespace Campfire.Web.Presenters;
 /// <summary>
 /// Maps message rows to what <c>messages/_message</c> renders, on one leased connection, with the rows a page needs
 /// preloaded (Rails' <c>with_creator</c>, <c>with_attachment_details</c>, <c>with_boosts</c>). <see cref="Items"/> looks
-/// each message's fragment up before building its view (plan lesson 3): <c>cache [ message, "presentation-v3" ]</c>
+/// each message's fragment up before building its view: <c>cache [ message, "presentation-v3" ]</c>
 /// wraps the whole partial, so on a hit nothing of it is evaluated. Ported from Rust <c>controllers/presenters</c> at
 /// <c>3fe9f61</c>. The loading of the rows lives in <c>MessagePresenter.Loading.cs</c>, the mapping to views in
 /// <c>MessagePresenter.Views.cs</c>.

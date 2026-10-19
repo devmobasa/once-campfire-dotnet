@@ -1,3 +1,4 @@
+using Campfire.Application.Data.Hooks;
 using Campfire.Application.Integrations.WebPush;
 using Campfire.Application.Memberships;
 using Campfire.Application.Pushes;
@@ -34,6 +35,25 @@ public sealed class PushTests
     }
 
     [Fact]
+    public async Task Banned_users_keep_subscriptions_without_receiving_room_content( )
+    {
+        using var testDatabase = await TestDatabase.CreateAsync( );
+        var userId = TestDatabase.Id( "jason" );
+        var message = await testDatabase.PostMessageAsync( "designers", "david", "Private room content" );
+        var before = await testDatabase.ReadAsync( db => PushSubscriptionOperations.PushFor( db, testDatabase.BodyText, message.Id, testDatabase.Clock.Now ) );
+        Assert.Contains( before.Everything, subscription => subscription.UserId == userId );
+        var subscriptions = await testDatabase.ReadAsync( db => PushSubscriptionOperations.ForUser( db, userId ) );
+        Assert.NotEmpty( subscriptions );
+        await testDatabase.ExecuteAsync( "UPDATE users SET status='banned' WHERE id=@p0", userId );
+
+        var after = await testDatabase.ReadAsync( db => PushSubscriptionOperations.PushFor( db, testDatabase.BodyText, message.Id, testDatabase.Clock.Now ) );
+
+        Assert.DoesNotContain( after.Everything.Concat( after.Mentions ), subscription => subscription.UserId == userId );
+        Assert.Equal( subscriptions.Select( subscription => subscription.Id ),
+            (await testDatabase.ReadAsync( db => PushSubscriptionOperations.ForUser( db, userId ) )).Select( subscription => subscription.Id ) );
+    }
+
+    [Fact]
     public async Task Notifies_subscribed_users_and_mentioned_ones( )
     {
         using var testDatabase = await TestDatabase.CreateAsync( );
@@ -67,11 +87,11 @@ public sealed class PushTests
         async Task<PushPayload> PayloadAsync( string room )
         {
             var message = await testDatabase.PostMessageAsync( room, "david", "Hi" );
-            return (await testDatabase.ReadAsync( db => PushSubscriptionOperations.PushFor(
+            return Assert.IsType<PushPayload>( (await testDatabase.ReadAsync( db => PushSubscriptionOperations.PushFor(
                 db,
                 testDatabase.BodyText,
                 message.Id,
-                testDatabase.Clock.Now ) )).Payload;
+                testDatabase.Clock.Now ) )).Payload );
         }
 
         Assert.Equal( new PushPayload( "Designers", "David: Hi", $"/rooms/{TestDatabase.Id( "designers" )}" ), await PayloadAsync( "designers" ) );
@@ -86,6 +106,43 @@ public sealed class PushTests
         await DeliveriesAsync( testDatabase, "designers", "unread" );
 
         Assert.Equal( 1, await testDatabase.ReadAsync( db => MembershipQueries.UnreadCount( db, TestDatabase.Id( "kevin" ) ) ) );
+    }
+
+    [Theory]
+    [InlineData( "unsubscribed" )]
+    [InlineData( "invisible" )]
+    [InlineData( "mentions-only" )]
+    public async Task Push_payload_is_not_rendered_without_eligible_recipients( string state )
+    {
+        using var testDatabase = await TestDatabase.CreateAsync( );
+        var message = await testDatabase.PostMessageAsync( "designers", "david", "No notification needed" );
+        if ( state == "unsubscribed" )
+        {
+            await testDatabase.ExecuteAsync( "DELETE FROM push_subscriptions" );
+        }
+        else
+        {
+            await testDatabase.ExecuteAsync( "UPDATE memberships SET involvement=@p0", state == "invisible" ? Involvement.Invisible : Involvement.Mentions );
+        }
+
+        var bodyText = new CountingBodyText( testDatabase.BodyText );
+        var (_, notifications) = await testDatabase.ReadAsync( db => MessagePusher.Notifications( db, bodyText, message.Id, testDatabase.Clock.Now ) );
+
+        Assert.Empty( notifications );
+        Assert.Equal( 0, bodyText.PlainTextCalls );
+    }
+
+    private sealed class CountingBodyText( IMessageBodyText inner ) : IMessageBodyText
+    {
+        public int PlainTextCalls { get; private set; }
+
+        public string ToPlainText( string storedBody, Func<long, string?> userName )
+        {
+            PlainTextCalls++;
+            return inner.ToPlainText( storedBody, userName );
+        }
+
+        public IReadOnlyList<long> MentionedUserIds( string storedBody ) => inner.MentionedUserIds( storedBody );
     }
 
     [Fact]

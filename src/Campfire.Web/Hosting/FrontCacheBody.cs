@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.IO.Pipelines;
+using Campfire.Web.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Net.Http.Headers;
 
@@ -14,7 +15,9 @@ internal sealed class FrontCacheBody( IHttpResponseBodyFeature inner, HttpContex
     private MemoryStream? _capture;
     private PipeWriter? _writer;
     private bool _overflowed;
+    private bool _suppressBody;
     public TimeSpan? Lifetime { get; private set; }
+    public DateTimeOffset CreatedAt { get; private set; }
     public Stream Stream => this;
     public PipeWriter Writer => _writer ??= PipeWriter.Create( this, new StreamPipeWriterOptions( leaveOpen: true ) );
     public override bool CanRead => false;
@@ -28,6 +31,16 @@ internal sealed class FrontCacheBody( IHttpResponseBodyFeature inner, HttpContex
 
     public Task DecideAsync( )
     {
+        CreatedAt = DateTimeOffset.UtcNow;
+        if ( httpContext.Response.StatusCode == StatusCodes.Status200OK
+            && RackConditionalGet.IsFresh( httpContext.Request.Headers, httpContext.Response.Headers.ETag.ToString( ), httpContext.Response.Headers.LastModified.ToString( ) ) )
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status304NotModified;
+            httpContext.Response.Headers.ContentLength = null;
+            httpContext.Response.ContentType = null;
+            _suppressBody = true;
+        }
+
         Lifetime = FrontResponseCache.Lifetime( httpContext.Response );
         if ( Lifetime is not null )
         {
@@ -45,6 +58,11 @@ internal sealed class FrontCacheBody( IHttpResponseBodyFeature inner, HttpContex
     public override async ValueTask WriteAsync( ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default )
     {
         await inner.StartAsync( cancellationToken );
+        if ( _suppressBody )
+        {
+            return;
+        }
+
         if ( _capture is not null && !_overflowed )
         {
             if ( buffer.Length > maximumBytes - _capture.Length )
@@ -72,6 +90,11 @@ internal sealed class FrontCacheBody( IHttpResponseBodyFeature inner, HttpContex
     public async Task SendFileAsync( string path, long offset, long? count, CancellationToken cancellationToken = default )
     {
         await inner.StartAsync( cancellationToken );
+        if ( _suppressBody )
+        {
+            return;
+        }
+
         if ( Lifetime is null || count > maximumBytes )
         {
             _overflowed = count > maximumBytes;

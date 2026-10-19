@@ -83,12 +83,13 @@ public sealed class ResponsePartsTests
     }
 
     [Fact]
-    public void Rack_conditional_get_matches_if_none_match_exactly_then_if_modified_since( )
+    public void Conditional_get_matches_etag_lists_then_if_modified_since_and_releases_the_body( )
     {
         var headers = new HeaderDictionary { ["If-None-Match"] = "W/\"a\", W/\"b\"" };
         var response = FrontendResult.WithBody( 200, "text/html", "x" ).Header( "ETag", "W/\"a\"" );
         RackConditionalGet.Apply( "GET", headers, response );
-        Assert.Equal( 200, response.Status );
+        Assert.Equal( 304, response.Status );
+        Assert.Equal( 0, response.Body.Length );
 
         var since = new HeaderDictionary { ["If-Modified-Since"] = "Sat, 01 Jun 2024 12:00:00 GMT" };
         var modified = FrontendResult.WithBody( 200, "text/html", "x" ).Header( "Last-Modified", "Sat, 01 Jun 2024 11:00:00 GMT" );

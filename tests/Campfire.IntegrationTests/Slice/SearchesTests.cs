@@ -7,8 +7,7 @@ namespace Campfire.IntegrationTests.Slice;
 
 /// <summary>
 /// <c>SearchesController</c> end to end (<c>test/controllers/searches_controller_test.rb</c>): full-text search over the
-/// rooms the user is in, the recent searches recorded and cleared, the query sanitized, and FTS5's syntax errors
-/// answered with 500 as Rails answers them at the pin (<c>?q=NOT</c>, retained Rails behavior).
+/// rooms the user is in, the recent searches recorded and cleared, and operator words treated as literal terms.
 /// </summary>
 public sealed partial class SearchesTests
 {
@@ -101,27 +100,28 @@ public sealed partial class SearchesTests
         Assert.Equal( 0, factory.Scalar<long>( $"SELECT count(*) FROM searches WHERE user_id = {David}" ) );
     }
 
-    /// <summary>set_messages runs before every action, so FTS5's syntax error fails create and clear before they write.</summary>
-    [Fact]
-    public async Task A_query_fts5_cannot_parse_answers_500_before_anything_is_written( )
+    [Theory]
+    [InlineData( "NOT" )]
+    [InlineData( "AND" )]
+    [InlineData( "salt AND" )]
+    public async Task Operator_words_do_not_block_index_create_or_clear( string query )
     {
         await using var factory = new SliceAppFactory( );
         using var david = await factory.SignedInClientAsync( "david@37signals.com" );
         var token = await david.CsrfTokenAsync( Routes.Searches );
         var before = factory.Scalar<long>( $"SELECT count(*) FROM searches WHERE user_id = {David}" );
 
-        var index = await david.GetAsync( Routes.SearchesFor( "NOT" ) );
-        var create = await david.SubmitFormAsync( HttpMethod.Post, Routes.Searches, token, [("q", "NOT")] );
-        var clear = await david.SubmitFormAsync( HttpMethod.Post, $"{Routes.ClearSearches}?q=NOT", token, [("_method", "delete")] );
+        var index = await david.GetAsync( Routes.SearchesFor( query ) );
+        var create = await david.SubmitFormAsync( HttpMethod.Post, Routes.Searches, token, [("q", query)] );
 
-        Assert.Equal( HttpStatusCode.InternalServerError, index.Status );
-        Assert.Contains( "(500)</title>", index.Body, StringComparison.Ordinal );
-        Assert.Contains( "Go back", index.Body, StringComparison.Ordinal );
-        Assert.DoesNotContain( "Exception", index.Body, StringComparison.Ordinal );
-        Assert.DoesNotContain( "SELECT", index.Body, StringComparison.Ordinal );
-        Assert.Equal( HttpStatusCode.InternalServerError, create.Status );
-        Assert.Equal( HttpStatusCode.InternalServerError, clear.Status );
-        Assert.Equal( before, factory.Scalar<long>( $"SELECT count(*) FROM searches WHERE user_id = {David}" ) );
+        Assert.Equal( HttpStatusCode.OK, index.Status );
+        Assert.Equal( HttpStatusCode.Found, create.Status );
+        Assert.Equal( before + 1, factory.Scalar<long>( $"SELECT count(*) FROM searches WHERE user_id = {David}" ) );
+
+        var clear = await david.SubmitFormAsync( HttpMethod.Post, $"{Routes.ClearSearches}?q={Uri.EscapeDataString( query )}", token, [("_method", "delete")] );
+
+        Assert.Equal( HttpStatusCode.Found, clear.Status );
+        Assert.Equal( 0, factory.Scalar<long>( $"SELECT count(*) FROM searches WHERE user_id = {David}" ) );
     }
 
     [Fact]

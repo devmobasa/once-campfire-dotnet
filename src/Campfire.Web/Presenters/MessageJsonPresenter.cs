@@ -14,7 +14,7 @@ namespace Campfire.Web.Presenters;
 /// Messages and boosts as the bot API's Jbuilder views show them (<c>messages/_message.json.jbuilder</c>,
 /// <c>messages/boosts/_boost.json.jbuilder</c>, <c>users/_user.json.jbuilder</c>), on one leased connection. Each entry
 /// carries its <c>json.cache!</c> key, built from the record's version, its author's version and the base URL of its
-/// URLs, so a stored fragment is used without building anything (plan lesson 3). A page's authors load in one query.
+/// URLs, so a cache hit skips building the fragment. A page's authors load in one query.
 /// </summary>
 public sealed class MessageJsonPresenter
 {

@@ -40,8 +40,8 @@ export interface NativeNetworkPair { expected: string; actual: string; applied: 
 
 const REQUIRED_SECURITY = { "x-content-type-options": "nosniff", "x-frame-options": "SAMEORIGIN", "referrer-policy": "strict-origin-when-cross-origin" }
 const ISSUED_SESSION_NAMES = new Set(["session_token", "_campfire_session"])
-const NATIVE_NAMES: Readonly<Record<string,string>> = { session_token: ".Campfire.Auth", _campfire_session: ".Campfire.Csrf" }
-const COOKIE_ALIASES: Readonly<Record<string,string>> = { ".Campfire.Auth": "session_token", ".Campfire.Csrf": "_campfire_session" }
+const NATIVE_NAMES: Readonly<Record<string,string>> = { session_token: "session_token", _campfire_session: ".Campfire.Csrf" }
+const COOKIE_ALIASES: Readonly<Record<string,string>> = { ".Campfire.Csrf": "_campfire_session" }
 
 interface Block { request: string; status: number; headers: Set<string>; values: Map<string,string>; cookies: string[]; body: string; other: string[]; original: string; legacyJoinAllowed: boolean }
 
@@ -81,8 +81,8 @@ export function verifyNativeContractReceipts(text: string, receipts: NetworkCont
     for (const [name,value] of Object.entries(REQUIRED_SECURITY)) if (raw.headers[name] !== value) issues.push(`${raw.request}: ${name} must be ${value}`)
     for (const cookie of raw.cookies) {
       if (cookie.malformed) issues.push(`${raw.request}: malformed cookie ${cookie.name}`)
-      else if ([".Campfire.Auth", ".Campfire.Csrf", ".Campfire.Flash", "last_room"].includes(cookie.name) && !validRawCookie(cookie, raw, cookie.name)) issues.push(`${raw.request}: ${cookie.name} attributes or lifetime invalid`)
-      else if (cookie.name === ".Campfire.Auth" && !cookie.cleared && (!authIssuanceRequest(raw.request) || ![302,303].includes(raw.status))) issues.push(`${raw.request}: unexpected authentication ticket reissuance`)
+      else if (["session_token", ".Campfire.Csrf", ".Campfire.Flash", "last_room"].includes(cookie.name) && !validRawCookie(cookie, raw, cookie.name)) issues.push(`${raw.request}: ${cookie.name} attributes or lifetime invalid`)
+      else if (cookie.name === "session_token" && !cookie.cleared && (!authIssuanceRequest(raw.request) || ![302,303].includes(raw.status))) issues.push(`${raw.request}: unexpected authentication ticket reissuance`)
     }
   }
   for (const block of blocks) {
@@ -284,7 +284,7 @@ function validRawCookie(raw: CookieContractReceipt | undefined, receipt: Network
   const allowed = new Set(["path", "httponly", "samesite", "secure", "expires", "max-age"])
   if (Object.keys(attrs).some(key => !allowed.has(key)) || attrs.path !== "/" || attrs.samesite?.toLowerCase() !== "lax" || attrs.httponly !== "" || Object.hasOwn(attrs, "secure") !== (receipt.protocol === "https:") || (Object.hasOwn(attrs, "secure") && attrs.secure !== "")) return false
   if (raw.cleared) return (!attrs.expires || Date.parse(attrs.expires) <= 0) && (!attrs["max-age"] || attrs["max-age"] === "0")
-  if (kind === ".Campfire.Auth") {
+  if (kind === "session_token") {
     const seconds = (Date.parse(attrs.expires ?? "") - Date.parse(receipt.headers.date ?? "")) / 1000
     return Number.isFinite(seconds) && Math.abs(seconds - 30 * 86400) <= 5 && (!attrs["max-age"] || attrs["max-age"] === String(30 * 86400))
   }
@@ -352,7 +352,7 @@ function cacheHeaders(block: Block, raw: NetworkContractReceipt | undefined, app
     if (pragma === undefined) unproven("antiforgery Pragma raw value")
     else if (pragma === "no-cache") { block.headers.delete("pragma"); block.values.delete("pragma"); apply("antiforgery Pragma no-cache") }
   }
-  if ([302, 303].includes(block.status) && /^text\/html(?:;|$)/.test(block.values.get("content-type") ?? "") && block.values.get("cache-control") === "no-cache" && raw?.cookies.some(cookie => [".Campfire.Auth", ".Campfire.Flash"].includes(cookie.name))) {
+  if ([302, 303].includes(block.status) && /^text\/html(?:;|$)/.test(block.values.get("content-type") ?? "") && block.values.get("cache-control") === "no-cache" && raw?.cookies.some(cookie => ["session_token", ".Campfire.Flash"].includes(cookie.name))) {
     if ((block.headers.has("pragma") && pragma === undefined) || (block.headers.has("expires") && expires === undefined)) unproven("native credential/flash redirect cache raw values")
     else if ((!block.headers.has("pragma") || pragma === "no-cache") && (!block.headers.has("expires") || expires === "Thu, 01 Jan 1970 00:00:00 GMT")) {
       for (const name of ["pragma", "expires"]) { block.headers.delete(name); block.values.delete(name) }

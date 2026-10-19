@@ -73,8 +73,9 @@ public sealed class MessageAttachmentTests
     public async Task Attaching_a_signed_blob_on_update_purges_the_old_blob_then_analyzes_the_new_one( )
     {
         using var testDatabase = await TestDatabase.CreateAsync( );
-        var created = await testDatabase.WriteAsync( scope => MessageOperations.Create( scope, InDesigners( ) with { Attachment = Moon } ) );
+        var created = await testDatabase.WriteAsync( scope => MessageOperations.Create( scope, InDesigners( "" ) with { Attachment = Moon } ) );
         var blob = await DirectUploadAsync( testDatabase );
+        await testDatabase.ExecuteAsync( "UPDATE active_storage_blobs SET filename = 'earth.jpg' WHERE id = @p0", blob.Id );
         testDatabase.Hooks.Clear( );
         testDatabase.Clock.Travel( TimeSpan.FromSeconds( 1 ) );
 
@@ -85,6 +86,7 @@ public sealed class MessageAttachmentTests
         } );
 
         Assert.Equal( [$"purge blob {created.Blob!.Id}", $"analyze blob {blob.Id}"], testDatabase.Hooks.Events );
+        Assert.Equal( "earth.jpg", await testDatabase.ReadAsync( db => MessageSearchIndex.IndexedBody( db, created.Message.Id ) ) );
         Assert.Equal( blob.Id, await testDatabase.ReadAsync( db => MessageBodies.Attachment( db, created.Message.Id )!.Value.Blob.Id ) );
         Assert.True( (await testDatabase.ReadAsync( db => MessageQueries.Find( db, created.Message.Id ) )).UpdatedAt > created.Message.UpdatedAt );
     }
@@ -98,6 +100,7 @@ public sealed class MessageAttachmentTests
             scope,
             InDesigners( ) with { AttachedBlob = new SignedBlobAttachment( blob.Id, Identified ) } ) );
         var before = await testDatabase.ReadAsync( db => MessageQueries.Find( db, created.Message.Id ) );
+        await testDatabase.ExecuteAsync( "UPDATE message_search_index SET body = 'stale' WHERE rowid = @p0", created.Message.Id );
         testDatabase.Hooks.Clear( );
         testDatabase.Clock.Travel( TimeSpan.FromSeconds( 1 ) );
 
@@ -107,16 +110,32 @@ public sealed class MessageAttachmentTests
             new SignedBlobAttachment( blob.Id, null ) ) );
 
         Assert.False( attached.Created );
+        Assert.Equal( "Hello there", await testDatabase.ReadAsync( db => MessageSearchIndex.IndexedBody( db, created.Message.Id ) ) );
         Assert.Empty( testDatabase.Hooks.Events );
         Assert.Equal( created.Attachment!.Id, await testDatabase.ReadAsync( db => MessageBodies.Attachment( db, created.Message.Id )!.Value.Attachment.Id ) );
         Assert.Equal( before.UpdatedAt, (await testDatabase.ReadAsync( db => MessageQueries.Find( db, created.Message.Id ) )).UpdatedAt );
     }
 
     [Fact]
+    public async Task Removing_an_absent_attachment_reindexes_without_touching_the_message( )
+    {
+        using var testDatabase = await TestDatabase.CreateAsync( );
+        var created = await testDatabase.WriteAsync( scope => MessageOperations.Create( scope, InDesigners( "cats" ) ) );
+        await testDatabase.ExecuteAsync( "UPDATE message_search_index SET body = 'stale' WHERE rowid = @p0", created.Message.Id );
+        testDatabase.Clock.Travel( TimeSpan.FromSeconds( 1 ) );
+
+        var removed = await testDatabase.WriteAsync( scope => MessageAttachments.Detach( scope, created.Message.Id ) );
+
+        Assert.False( removed );
+        Assert.Equal( "cats", await testDatabase.ReadAsync( db => MessageSearchIndex.IndexedBody( db, created.Message.Id ) ) );
+        Assert.Equal( created.Message.UpdatedAt, (await testDatabase.ReadAsync( db => MessageQueries.Find( db, created.Message.Id ) )).UpdatedAt );
+    }
+
+    [Fact]
     public async Task Detaching_destroys_the_attachment_purges_its_blob_later_and_touches_the_message_and_room( )
     {
         using var testDatabase = await TestDatabase.CreateAsync( );
-        var created = await testDatabase.WriteAsync( scope => MessageOperations.Create( scope, InDesigners( ) with { Attachment = Moon } ) );
+        var created = await testDatabase.WriteAsync( scope => MessageOperations.Create( scope, InDesigners( "" ) with { Attachment = Moon } ) );
         var roomBefore = await testDatabase.ReadAsync( db => RoomQueries.FindById( db, created.Message.RoomId )! );
         testDatabase.Hooks.Clear( );
         testDatabase.Clock.Travel( TimeSpan.FromSeconds( 1 ) );
@@ -124,6 +143,7 @@ public sealed class MessageAttachmentTests
         var detached = await testDatabase.WriteAsync( scope => MessageAttachments.Detach( scope, created.Message.Id ) );
         var again = await testDatabase.WriteAsync( scope => MessageAttachments.Detach( scope, created.Message.Id ) );
 
+        Assert.Equal( "", await testDatabase.ReadAsync( db => MessageSearchIndex.IndexedBody( db, created.Message.Id ) ) );
         Assert.True( detached );
         Assert.False( again );
         Assert.Equal( [$"purge blob {created.Blob!.Id}"], testDatabase.Hooks.Events );

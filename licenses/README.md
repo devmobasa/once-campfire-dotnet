@@ -14,6 +14,8 @@ The root MIT license covers the application except for retained third-party lice
 | Marked 16.4.1 bundled in Lexxy | MIT | [License](Marked-LICENSE) | [Upstream](https://github.com/markedjs/marked/tree/v16.4.1) |
 | Prism 1.30.0 bundled in Lexxy | MIT | [License](Prism-LICENSE) | [Upstream](https://github.com/PrismJS/prism/tree/v1.30.0) |
 | Adapted Gumbo tree construction from Nokogiri 1.19.4 | Apache-2.0 | [License](Gumbo-LICENSE) | [Upstream](https://github.com/sparklemotion/nokogiri/tree/v1.19.4/gumbo-parser/src) |
+| BCrypt.Net-Next 4.2.1 | MIT | [License](BCrypt.Net-Next-LICENSE) | [Package source](https://github.com/BcryptNet/bcrypt.net/tree/c3e7399f797b5ffe02c2fe7e91966947521742c5) |
+| Campfire sidebar and autocomplete frontend | MIT | [License](once-campfire-frontend-MIT-LICENSE) | [Pinned source](https://github.com/basecamp/once-campfire/tree/05c5a2c0d72f7fd74d7c2ace23cc123000f956b9/app/javascript) |
 
 [Gumbo attribution and adaptation notice](Gumbo-NOTICE). [Asset versions and checksums](../vendor/assets/MANIFEST.md). The Lexxy dependency versions are checked against its tagged package metadata and bundled banners; Lexical's retained Meta Platforms copyright applies to its bundled modules.
 

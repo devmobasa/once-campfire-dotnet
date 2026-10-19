@@ -2,6 +2,7 @@ using Campfire.Application.Data;
 using Campfire.Application.Sessions;
 using Campfire.Application.Users;
 using Campfire.Web.Cable;
+using Campfire.Web.Http;
 using Campfire.Web.Policy;
 
 namespace Campfire.Web.App;
@@ -61,9 +62,17 @@ public sealed class AuthenticationStore( CampfireDatabase database, CableServer 
     {
         ArgumentNullException.ThrowIfNull( user );
 
-        var session = await database.WriteAsync( scope => SessionOperations.Start( scope, user.Id, userAgent, ipAddress ), cancellationToken );
-        var record = user.Record as User ?? await database.ReadAsync( db => UserQueries.Find( db, user.Id ), cancellationToken );
-        return ToCurrent( session, record );
+        return await database.WriteAsync( scope =>
+        {
+            var current = UserQueries.FindActiveById( scope.Db, user.Id );
+            if ( user.Record is not User verified || current is null || current.IsBot
+                || !string.Equals( current.PasswordDigest, verified.PasswordDigest, StringComparison.Ordinal ) )
+            {
+                throw new HttpFailureException( StatusCodes.Status401Unauthorized, "The verified credential is no longer current." );
+            }
+
+            return ToCurrent( SessionOperations.Start( scope, current.Id, userAgent, ipAddress ), current );
+        }, cancellationToken );
     }
 
     public ValueTask DestroySessionAsync( CurrentSession session, CancellationToken cancellationToken )

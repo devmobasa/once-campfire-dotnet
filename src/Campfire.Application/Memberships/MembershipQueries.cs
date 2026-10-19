@@ -9,6 +9,8 @@ namespace Campfire.Application.Memberships;
 /// <summary>Reads of <c>memberships</c>.</summary>
 public static class MembershipQueries
 {
+    private const int UnreadRecipientPageSize = 128;
+
     /// <summary><c>Users::SidebarsController::DIRECT_PLACEHOLDERS</c>.</summary>
     public const int DirectPlaceholders = 20;
 
@@ -82,6 +84,18 @@ public static class MembershipQueries
         {
             roomId
         }, db.Transaction ).AsList( );
+    }
+
+    /// <summary>Members who still have the room unread or have a current connection when notification work runs.</summary>
+    public static List<UnreadRoomRecipient> UnreadOrConnectedPage( CampfireDb db, long roomId, DateTime now, long afterMembershipId )
+    {
+        ArgumentNullException.ThrowIfNull( db );
+
+        return db.Connection.Query<UnreadRoomRecipient>(
+            "SELECT memberships.id AS MembershipId, memberships.user_id AS UserId FROM memberships " +
+            "WHERE memberships.room_id = @roomId AND memberships.id > @afterMembershipId " +
+            "AND (memberships.unread_at IS NOT NULL OR memberships.connected_at >= @cutoff) ORDER BY memberships.id LIMIT @limit",
+            new { roomId, afterMembershipId, cutoff = Membership.ConnectionCutoff( now ), limit = UnreadRecipientPageSize }, db.Transaction ).AsList( );
     }
 
     /// <summary>
@@ -162,39 +176,6 @@ public static class MembershipQueries
                 },
                 db.Transaction )
             .ToDictionary( row => row.UserId, row => checked(( int ) row.Count) );
-    }
-
-    /// <summary><c>Membership.connected.exists?(id)</c>.</summary>
-    public static bool IsConnected( CampfireDb db, long membershipId, DateTime now )
-    {
-        ArgumentNullException.ThrowIfNull( db );
-
-        var cutoff = Membership.ConnectionCutoff( now );
-        return db.Connection.ExecuteScalar<bool>(
-            "SELECT EXISTS (SELECT 1 FROM memberships WHERE memberships.connected_at >= @cutoff AND memberships.id = @membershipId)",
-            new
-            {
-                cutoff,
-                membershipId
-            },
-            db.Transaction );
-    }
-
-    /// <summary><c>Membership.disconnected.exists?(id)</c>.</summary>
-    public static bool IsDisconnected( CampfireDb db, long membershipId, DateTime now )
-    {
-        ArgumentNullException.ThrowIfNull( db );
-
-        var cutoff = Membership.ConnectionCutoff( now );
-        return db.Connection.ExecuteScalar<bool>(
-            "SELECT EXISTS (SELECT 1 FROM memberships " +
-            "WHERE (memberships.connected_at IS NULL OR memberships.connected_at < @cutoff) AND memberships.id = @membershipId)",
-            new
-            {
-                cutoff,
-                membershipId
-            },
-            db.Transaction );
     }
 
     /// <summary>

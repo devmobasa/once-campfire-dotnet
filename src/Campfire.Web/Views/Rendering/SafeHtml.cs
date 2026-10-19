@@ -5,7 +5,7 @@ namespace Campfire.Web.Views;
 
 /// <summary>
 /// Trusted markup: <c>ActiveSupport::SafeBuffer</c>. Slices write it without escaping, while plain strings are always
-/// escaped by the Rails encoder. Build it from escaped text (<see cref="Text"/>), from helpers, or from markup that
+/// escaped by the slice write layer. Build it from escaped text (<see cref="Text"/>), from helpers, or from markup that
 /// is already sanitized (<see cref="Raw"/>, e.g. rendered rich text).
 /// </summary>
 public sealed class SafeHtml : HtmlString, IEquatable<SafeHtml>
